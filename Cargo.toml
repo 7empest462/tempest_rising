@@ -1,0 +1,42 @@
+[package]
+name = "tempest_rising"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+avian3d = "0.7.0"
+bevy = { version = "0.19", features = ["default", "audio-all-formats"] }
+bevy-tnua = "0.32.0"
+bevy-tnua-avian3d = "0.12.0"
+bevy_egui = "0.41"
+bevy_gltf = "0.19.0"
+bevy_panorbit_camera = "0.35.0"
+bytemuck = "1.25.0"
+fastrand = "2.4.1"
+getrandom = "0.4.2"
+image = "0.25.10"
+rand = "0.10.1"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+tokio = { version = "1.52.3", features = ["full"] }
+web-sys = "0.3.99"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug-assertions = false
+debug = false
+overflow-checks = false
+rpath = false
+
+[profile.dev]
+opt-level = 1                  # Light optimization (good balance)
+debug = true                   # Full debug info
+split-debuginfo = "unpacked"   # Better debugging on macOS
+overflow-checks = true         # Catch bugs during development
+incremental = true             # Faster incremental compiles
+
+[profile.dev.package.bevy]
+opt-level = 3
