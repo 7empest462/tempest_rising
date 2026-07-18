@@ -1,14 +1,20 @@
+use crate::map_editor::data::EditableMesh;
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
-use crate::map_editor::data::EditableMesh;
 
 impl EditableMesh {
     /// Create a standard 1x1x1 cube centered at origin
     pub fn new_cube(size: f32) -> Self {
         let h = size * 0.5;
         let vertices = vec![
-            [-h, -h, -h], [h, -h, -h], [h, h, -h], [-h, h, -h], // Back face
-            [-h, -h,  h], [h, -h,  h], [h, h,  h], [-h, h,  h], // Front face
+            [-h, -h, -h],
+            [h, -h, -h],
+            [h, h, -h],
+            [-h, h, -h], // Back face
+            [-h, -h, h],
+            [h, -h, h],
+            [h, h, h],
+            [-h, h, h], // Front face
         ];
         // Faces (windings pointing outwards)
         let faces = vec![
@@ -75,7 +81,10 @@ impl EditableMesh {
             }
         }
 
-        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, bevy::asset::RenderAssetUsages::default());
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            bevy::asset::RenderAssetUsages::default(),
+        );
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
@@ -174,7 +183,7 @@ impl EditableMesh {
     /// Subdivides the entire mesh by splitting all faces using midpoint subdivision
     pub fn subdivide(&mut self) {
         let mut new_faces = Vec::new();
-        
+
         for face in &self.faces {
             if face.len() < 3 {
                 continue;
@@ -207,7 +216,7 @@ impl EditableMesh {
                 let orig_v = face[i];
                 let mid_prev = edge_mid_indices[prev_i];
                 let mid_next = edge_mid_indices[i];
-                
+
                 new_faces.push(vec![orig_v, mid_next, center_v_idx, mid_prev]);
             }
         }
@@ -216,10 +225,11 @@ impl EditableMesh {
     }
 
     /// Bevels (chamfers) all vertices by shaving off a specified amount
+    #[allow(clippy::needless_range_loop)]
     pub fn bevel(&mut self, amount: f32) {
         let mut new_faces = Vec::new();
         let orig_vert_count = self.vertices.len();
-        
+
         // For each vertex, track all faces sharing it
         let mut vertex_faces = vec![Vec::new(); orig_vert_count];
         for (f_idx, face) in self.faces.iter().enumerate() {
@@ -338,7 +348,10 @@ impl EditableMesh {
 
     /// Connects two separate faces to bridge them, creating a geometric tunnel/bridge
     pub fn bridge(&mut self, face_idx_a: usize, face_idx_b: usize) {
-        if face_idx_a >= self.faces.len() || face_idx_b >= self.faces.len() || face_idx_a == face_idx_b {
+        if face_idx_a >= self.faces.len()
+            || face_idx_b >= self.faces.len()
+            || face_idx_a == face_idx_b
+        {
             return;
         }
 
@@ -353,7 +366,7 @@ impl EditableMesh {
         // Create side faces bridging the edges of both faces
         for i in 0..len {
             let next_i = (i + 1) % len;
-            
+
             // Bridge side quad
             let a1 = face_a[i];
             let a2 = face_a[next_i];
@@ -374,7 +387,14 @@ impl EditableMesh {
     }
 
     /// Performs a Boolean Union, Subtraction, or Intersection with another mesh
-    pub fn boolean_operation(&mut self, other: &EditableMesh, op: &str, other_pos: Vec3, other_rot: Quat) {
+    #[allow(clippy::collapsible_match)]
+    pub fn boolean_operation(
+        &mut self,
+        other: &EditableMesh,
+        op: &str,
+        other_pos: Vec3,
+        other_rot: Quat,
+    ) {
         // Transform other mesh's vertices to self local space
         let mut transformed_other_verts = Vec::new();
         for v in &other.vertices {
@@ -393,9 +413,9 @@ impl EditableMesh {
         // A simple inside/outside test for a point against a mesh is to find if it is on the negative
         // side of all planes of the mesh (works perfectly for convex components which make up Backrooms assets).
         let mut kept_faces = Vec::new();
-        
+
         let self_vertices: Vec<Vec3> = self.vertices.iter().map(|v| Vec3::from_array(*v)).collect();
-        
+
         // 1. Process self faces against other's volume
         for face in &self.faces {
             let mut center = Vec3::ZERO;
@@ -404,7 +424,8 @@ impl EditableMesh {
             }
             center /= face.len() as f32;
 
-            let is_inside_other = is_point_inside_mesh(center, &transformed_other_verts, &other.faces);
+            let is_inside_other =
+                is_point_inside_mesh(center, &transformed_other_verts, &other.faces);
 
             match op {
                 "union" => {

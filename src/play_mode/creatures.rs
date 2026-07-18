@@ -376,6 +376,7 @@ pub fn spawn_defender_trilobite(
 // ──────────────────────────────────────────────
 
 // Spawns a list of creatures spread out on flat areas of the map
+#[allow(clippy::needless_range_loop)]
 pub fn spawn_creatures_system(
     mut commands: Commands,
     asset_server: Res<AssetServer>,

@@ -1562,7 +1562,7 @@ fn pedestal_glow_system(time: Res<Time>, mut query: Query<&mut Transform, With<R
             Quat::from_rotation_y(elapsed * 1.5) * Quat::from_rotation_x(elapsed * 0.5);
     }
 }
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn house_interaction_system(
     mut commands: Commands,
     keyboard_input: Res<ButtonInput<KeyCode>>,

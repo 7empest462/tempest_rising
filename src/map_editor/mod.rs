@@ -8,10 +8,10 @@ use std::fs::File;
 use std::io::{Read, Write};
 
 pub mod data;
+pub mod geometry;
 pub mod noise;
 pub mod tree_generator;
-pub mod geometry;
-use data::{Biome, PlacedPrefab, TempestMap, EditableMesh};
+use data::{Biome, EditableMesh, PlacedPrefab, TempestMap};
 use noise::PerlinNoise;
 
 #[derive(Component)]
@@ -70,6 +70,7 @@ pub enum SculptTool {
     PlaceModularCorner,
     PlaceModularFloor,
     PlaceModularRoof,
+    PlaceModularRoofGable,
     PlaceModularDoorFrame,
     PlaceModularWindowFrame,
     PlaceWallTJunction,
@@ -83,6 +84,10 @@ pub enum SculptTool {
     PlaceFurnace,
     PlaceBed,
     PlaceTorch,
+    PlaceChair,
+    PlaceDesk,
+    PlaceHealthPack,
+    PlaceCrate,
     PlaceCustomAsset,
     PlaceCustomMesh,
     DeletePrefab,
@@ -113,7 +118,10 @@ pub struct SelectionState {
     pub snap_grid_size: f32,
     pub snap_to_objects: bool,
     pub active_drag_axis: Option<usize>, // None, Some(0)=X, Some(1)=Y, Some(2)=Z
+    pub drag_scale: bool,                // true = scale/stretch, false = translate
     pub drag_start_offset: Vec3,
+    pub drag_start_value: Vec3,
+    pub drag_start_mouse_proj: f32,
     pub selected_texture: String,
     pub preview_entity: Option<Entity>,
     pub preview_tool: Option<SculptTool>,
@@ -127,7 +135,10 @@ impl Default for SelectionState {
             snap_grid_size: 1.0,
             snap_to_objects: true,
             active_drag_axis: None,
+            drag_scale: false,
             drag_start_offset: Vec3::ZERO,
+            drag_start_value: Vec3::ZERO,
+            drag_start_mouse_proj: 0.0,
             selected_texture: "Default".to_string(),
             preview_entity: None,
             preview_tool: None,
@@ -720,6 +731,73 @@ pub fn generate_water_mesh(w: u32, h: u32) -> Mesh {
     mesh
 }
 
+pub fn generate_roof_gable_mesh() -> Mesh {
+    let positions = vec![
+        // Front Face
+        [-2.0, 0.0, 0.1], [2.0, 0.0, 0.1], [2.0, 2.35, 0.1],
+        // Back Face
+        [-2.0, 0.0, -0.1], [2.0, 0.0, -0.1], [2.0, 2.35, -0.1],
+        // Bottom Face
+        [-2.0, 0.0, -0.1], [2.0, 0.0, -0.1], [-2.0, 0.0, 0.1], [2.0, 0.0, 0.1],
+        // Left Slanted Face
+        [-2.0, 0.0, -0.1], [-2.0, 0.0, 0.1], [2.0, 2.35, -0.1], [2.0, 2.35, 0.1],
+        // Right Vertical Face
+        [2.0, 0.0, -0.1], [2.0, 0.0, 0.1], [2.0, 2.35, -0.1], [2.0, 2.35, 0.1],
+    ];
+
+    let normals = vec![
+        // Front Face
+        [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0],
+        // Back Face
+        [0.0, 0.0, -1.0], [0.0, 0.0, -1.0], [0.0, 0.0, -1.0],
+        // Bottom Face
+        [0.0, -1.0, 0.0], [0.0, -1.0, 0.0], [0.0, -1.0, 0.0], [0.0, -1.0, 0.0],
+        // Left Slanted Face
+        [-0.5, 0.86, 0.0], [-0.5, 0.86, 0.0], [-0.5, 0.86, 0.0], [-0.5, 0.86, 0.0],
+        // Right Vertical Face
+        [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0],
+    ];
+
+    let uvs = vec![
+        // Front Face
+        [0.0, 0.0], [1.0, 0.0], [1.0, 1.0],
+        // Back Face
+        [1.0, 0.0], [0.0, 0.0], [1.0, 1.0],
+        // Bottom Face
+        [0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0],
+        // Left Slanted Face
+        [0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0],
+        // Right Vertical Face
+        [0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0],
+    ];
+
+    let indices = vec![
+        // Front Face
+        0, 1, 2,
+        // Back Face
+        5, 4, 3,
+        // Bottom Face
+        6, 8, 9,
+        6, 9, 7,
+        // Left Slanted Face
+        10, 11, 13,
+        10, 13, 12,
+        // Right Vertical Face
+        14, 17, 15,
+        14, 16, 17,
+    ];
+
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
+
 fn get_material_for_texture(
     texture_name: Option<&str>,
     asset_server: &AssetServer,
@@ -756,6 +834,7 @@ fn get_material_for_texture(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_prefab_visuals(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
@@ -802,7 +881,8 @@ fn spawn_prefab_visuals(
     parent
 }
 
-fn spawn_prefab_visuals_children(
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_prefab_visuals_children(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
@@ -1112,6 +1192,24 @@ fn spawn_prefab_visuals_children(
                 .id();
             commands.entity(parent).add_child(roof);
         }
+        "roof_gable" => {
+            let mat = get_material_for_texture(
+                texture_override,
+                asset_server,
+                materials,
+                Color::srgb(0.85, 0.85, 0.82),
+            );
+            let mesh_handle = meshes.add(generate_roof_gable_mesh());
+            let visual = commands
+                .spawn((
+                    Mesh3d(mesh_handle),
+                    MeshMaterial3d(mat),
+                    Transform::from_xyz(0.0, 0.0, 0.0),
+                    MapEditorEntity,
+                ))
+                .id();
+            commands.entity(parent).add_child(visual);
+        }
         "door_frame" => {
             let mat = get_material_for_texture(
                 texture_override,
@@ -1216,56 +1314,64 @@ fn spawn_prefab_visuals_children(
             }
         }
         "chest" => {
-            let wood_mat = get_material_for_texture(
-                texture_override,
-                asset_server,
-                materials,
-                Color::srgb(0.48, 0.32, 0.2),
-            );
-            let iron_mat = materials.add(StandardMaterial {
-                base_color: Color::srgb(0.3, 0.3, 0.32),
-                metallic: 0.8,
-                perceptual_roughness: 0.35,
-                ..default()
-            });
-            let base = commands
+            let child = commands
                 .spawn((
-                    Mesh3d(meshes.add(Cuboid::new(1.2, 0.6, 0.7))),
-                    MeshMaterial3d(wood_mat.clone()),
-                    Transform::from_xyz(0.0, 0.3, 0.0),
+                    WorldAssetRoot(asset_server.load("Prop_Chest.gltf#Scene0")),
+                    Transform::default(),
+                    Visibility::Visible,
+                    InheritedVisibility::default(),
                     MapEditorEntity,
                 ))
                 .id();
-            let lid = commands
+            commands.entity(parent).add_child(child);
+        }
+        "prop_chair" => {
+            let child = commands
                 .spawn((
-                    Mesh3d(meshes.add(Cuboid::new(1.24, 0.2, 0.74))),
-                    MeshMaterial3d(wood_mat),
-                    Transform::from_xyz(0.0, 0.7, 0.0),
+                    WorldAssetRoot(asset_server.load("Prop_Chair.gltf#Scene0")),
+                    Transform::default(),
+                    Visibility::Visible,
+                    InheritedVisibility::default(),
                     MapEditorEntity,
                 ))
                 .id();
-            let band_l = commands
+            commands.entity(parent).add_child(child);
+        }
+        "prop_desk" => {
+            let child = commands
                 .spawn((
-                    Mesh3d(meshes.add(Cuboid::new(0.08, 0.82, 0.76))),
-                    MeshMaterial3d(iron_mat.clone()),
-                    Transform::from_xyz(-0.4, 0.4, 0.0),
+                    WorldAssetRoot(asset_server.load("Prop_Desk_L.gltf#Scene0")),
+                    Transform::default(),
+                    Visibility::Visible,
+                    InheritedVisibility::default(),
                     MapEditorEntity,
                 ))
                 .id();
-            let band_r = commands
+            commands.entity(parent).add_child(child);
+        }
+        "prop_health_pack" => {
+            let child = commands
                 .spawn((
-                    Mesh3d(meshes.add(Cuboid::new(0.08, 0.82, 0.76))),
-                    MeshMaterial3d(iron_mat),
-                    Transform::from_xyz(0.4, 0.4, 0.0),
+                    WorldAssetRoot(asset_server.load("Prop_HealthPack.gltf#Scene0")),
+                    Transform::default(),
+                    Visibility::Visible,
+                    InheritedVisibility::default(),
                     MapEditorEntity,
                 ))
                 .id();
-            commands
-                .entity(parent)
-                .add_child(base)
-                .add_child(lid)
-                .add_child(band_l)
-                .add_child(band_r);
+            commands.entity(parent).add_child(child);
+        }
+        "prop_crate" => {
+            let child = commands
+                .spawn((
+                    WorldAssetRoot(asset_server.load("Prop_Crate_Large.gltf#Scene0")),
+                    Transform::default(),
+                    Visibility::Visible,
+                    InheritedVisibility::default(),
+                    MapEditorEntity,
+                ))
+                .id();
+            commands.entity(parent).add_child(child);
         }
         "workbench" => {
             let wood_mat = get_material_for_texture(
@@ -1492,7 +1598,7 @@ fn spawn_prefab_visuals_children(
                 .spawn((
                     Mesh3d(meshes.add(Cuboid::new(4.0, 0.15, 4.0))),
                     MeshMaterial3d(mat),
-                    Transform::from_xyz(0.0, 3.5, 0.0),
+                    Transform::from_xyz(0.0, 0.0, 0.0),
                     MapEditorEntity,
                 ))
                 .id();
@@ -1862,6 +1968,12 @@ struct MapEditorUiParams<'w, 's> {
     geom_settings: ResMut<'w, GeometryEditorSettings>,
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    clippy::collapsible_if,
+    clippy::type_complexity,
+    clippy::needless_range_loop
+)]
 fn map_editor_ui(
     params: MapEditorUiParams,
     terrain_query: Query<(Entity, &Mesh3d), With<TerrainMesh>>,
@@ -2007,6 +2119,7 @@ fn map_editor_ui(
             );
             ui.selectable_value(&mut brush.tool, SculptTool::PlaceWallCross, "Cross ✚");
             ui.selectable_value(&mut brush.tool, SculptTool::PlaceCeilingTile, "Ceiling ⬜");
+            ui.selectable_value(&mut brush.tool, SculptTool::PlaceModularRoofGable, "Roof Gable 📐");
         });
         ui.horizontal(|ui| {
             ui.selectable_value(
@@ -2023,11 +2136,17 @@ fn map_editor_ui(
         });
         ui.label("Functional Structures:");
         ui.horizontal(|ui| {
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceChest, "Chest 📦");
+            ui.selectable_value(&mut brush.tool, SculptTool::PlaceChest, "Chest 🧰");
             ui.selectable_value(&mut brush.tool, SculptTool::PlaceWorkbench, "Workbench 🔨");
             ui.selectable_value(&mut brush.tool, SculptTool::PlaceFurnace, "Furnace 🔥");
             ui.selectable_value(&mut brush.tool, SculptTool::PlaceBed, "Bed 🛏️");
             ui.selectable_value(&mut brush.tool, SculptTool::PlaceTorch, "Torch 🔦");
+        });
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut brush.tool, SculptTool::PlaceChair, "Chair 🪑");
+            ui.selectable_value(&mut brush.tool, SculptTool::PlaceDesk, "Desk 🗄️");
+            ui.selectable_value(&mut brush.tool, SculptTool::PlaceHealthPack, "Health 🏥");
+            ui.selectable_value(&mut brush.tool, SculptTool::PlaceCrate, "Crate 📦");
         });
         ui.horizontal(|ui| {
             ui.selectable_value(
@@ -2221,27 +2340,27 @@ fn map_editor_ui(
 
                 // --- Geometry Mesh Editor Panel ---
                 if map.prefabs[sel_idx].prefab_type == "custom_mesh" {
-                    let (num_faces, num_vertices) = if let Some(ref custom) = map.prefabs[sel_idx].custom_mesh {
-                        (custom.faces.len(), custom.vertices.len())
-                    } else {
-                        (0, 0)
-                    };
+                    let (num_faces, num_vertices) =
+                        if let Some(ref custom) = map.prefabs[sel_idx].custom_mesh {
+                            (custom.faces.len(), custom.vertices.len())
+                        } else {
+                            (0, 0)
+                        };
 
                     ui.separator();
                     ui.heading("📐 Geometry / Mesh Editor");
-                    ui.label(format!(
-                        "Faces: {} | Vertices: {}",
-                        num_faces,
-                        num_vertices
-                    ));
+                    ui.label(format!("Faces: {} | Vertices: {}", num_faces, num_vertices));
 
                     // Selected face index slider
                     if num_faces > 0 {
                         ui.horizontal(|ui| {
                             ui.label("Selected Face:");
                             ui.add(
-                                egui::Slider::new(&mut geom_settings.selected_face_idx, 0..=(num_faces - 1))
-                                    .text("Face ID"),
+                                egui::Slider::new(
+                                    &mut geom_settings.selected_face_idx,
+                                    0..=(num_faces - 1),
+                                )
+                                .text("Face ID"),
                             );
                         });
                     }
@@ -2252,13 +2371,19 @@ fn map_editor_ui(
                     // Extrude Face
                     ui.horizontal(|ui| {
                         ui.label("Extrude Distance:");
-                        ui.add(egui::Slider::new(&mut geom_settings.extrude_dist, -10.0..=10.0));
+                        ui.add(egui::Slider::new(
+                            &mut geom_settings.extrude_dist,
+                            -10.0..=10.0,
+                        ));
                     });
                     if ui.button("🛠 Extrude Selected Face").clicked() {
                         let mut ok = false;
                         if let Some(ref mut custom) = map.prefabs[sel_idx].custom_mesh {
                             if geom_settings.selected_face_idx < custom.faces.len() {
-                                custom.extrude(geom_settings.selected_face_idx, geom_settings.extrude_dist);
+                                custom.extrude(
+                                    geom_settings.selected_face_idx,
+                                    geom_settings.extrude_dist,
+                                );
                                 ok = true;
                             }
                         }
@@ -2280,13 +2405,19 @@ fn map_editor_ui(
                     // Inset Face
                     ui.horizontal(|ui| {
                         ui.label("Inset Factor:");
-                        ui.add(egui::Slider::new(&mut geom_settings.inset_factor, 0.0..=0.99));
+                        ui.add(egui::Slider::new(
+                            &mut geom_settings.inset_factor,
+                            0.0..=0.99,
+                        ));
                     });
                     if ui.button("🛠 Inset Selected Face").clicked() {
                         let mut ok = false;
                         if let Some(ref mut custom) = map.prefabs[sel_idx].custom_mesh {
                             if geom_settings.selected_face_idx < custom.faces.len() {
-                                custom.inset(geom_settings.selected_face_idx, geom_settings.inset_factor);
+                                custom.inset(
+                                    geom_settings.selected_face_idx,
+                                    geom_settings.inset_factor,
+                                );
                                 ok = true;
                             }
                         }
@@ -2308,7 +2439,10 @@ fn map_editor_ui(
                     // Bevel Edges
                     ui.horizontal(|ui| {
                         ui.label("Bevel Amount:");
-                        ui.add(egui::Slider::new(&mut geom_settings.bevel_amount, 0.0..=2.0));
+                        ui.add(egui::Slider::new(
+                            &mut geom_settings.bevel_amount,
+                            0.0..=2.0,
+                        ));
                     });
                     if ui.button("🛠 Bevel All Edges").clicked() {
                         let mut ok = false;
@@ -2402,8 +2536,11 @@ fn map_editor_ui(
                     ui.horizontal(|ui| {
                         ui.label("Bridge to Face:");
                         ui.add(
-                            egui::Slider::new(&mut geom_settings.bridge_face_b, 0..=(num_faces - 1))
-                                .text("Face ID B"),
+                            egui::Slider::new(
+                                &mut geom_settings.bridge_face_b,
+                                0..=(num_faces - 1),
+                            )
+                            .text("Face ID B"),
                         );
                     });
                     if ui.button("🌉 Bridge Face A to B").clicked() {
@@ -2413,7 +2550,10 @@ fn map_editor_ui(
                                 && geom_settings.bridge_face_b < custom.faces.len()
                                 && geom_settings.selected_face_idx != geom_settings.bridge_face_b
                             {
-                                custom.bridge(geom_settings.selected_face_idx, geom_settings.bridge_face_b);
+                                custom.bridge(
+                                    geom_settings.selected_face_idx,
+                                    geom_settings.bridge_face_b,
+                                );
                                 ok = true;
                             }
                         }
@@ -2438,8 +2578,12 @@ fn map_editor_ui(
 
                     let mut other_custom_meshes = Vec::new();
                     for (idx, p) in map.prefabs.iter().enumerate() {
-                        if idx != sel_idx && p.prefab_type == "custom_mesh" && p.custom_mesh.is_some() {
-                            other_custom_meshes.push((idx, format!("Mesh #{} (pos: {:?})", idx, p.position)));
+                        if idx != sel_idx
+                            && p.prefab_type == "custom_mesh"
+                            && p.custom_mesh.is_some()
+                        {
+                            other_custom_meshes
+                                .push((idx, format!("Mesh #{} (pos: {:?})", idx, p.position)));
                         }
                     }
 
@@ -2457,7 +2601,10 @@ fn map_editor_ui(
                             .selected_text(&combo_label)
                             .show_ui(ui, |ui| {
                                 for &(idx, ref label) in &other_custom_meshes {
-                                    if ui.selectable_label(selected_target_idx == Some(idx), label).clicked() {
+                                    if ui
+                                        .selectable_label(selected_target_idx == Some(idx), label)
+                                        .clicked()
+                                    {
                                         selected_target_idx = Some(idx);
                                     }
                                 }
@@ -2466,9 +2613,21 @@ fn map_editor_ui(
 
                         // Operation type buttons
                         ui.horizontal(|ui| {
-                            ui.selectable_value(&mut geom_settings.bool_op, "Union".to_string(), "Union ➕");
-                            ui.selectable_value(&mut geom_settings.bool_op, "Subtraction".to_string(), "Subtract ➖");
-                            ui.selectable_value(&mut geom_settings.bool_op, "Intersection".to_string(), "Intersect ✖");
+                            ui.selectable_value(
+                                &mut geom_settings.bool_op,
+                                "Union".to_string(),
+                                "Union ➕",
+                            );
+                            ui.selectable_value(
+                                &mut geom_settings.bool_op,
+                                "Subtraction".to_string(),
+                                "Subtract ➖",
+                            );
+                            ui.selectable_value(
+                                &mut geom_settings.bool_op,
+                                "Intersection".to_string(),
+                                "Intersect ✖",
+                            );
                         });
 
                         if let Some(target_idx) = geom_settings.bool_target_idx {
@@ -2477,16 +2636,21 @@ fn map_editor_ui(
                                     let sel_pos = Vec3::from_array(map.prefabs[sel_idx].position);
                                     let sel_rot = Quat::from_array(map.prefabs[sel_idx].rotation);
 
-                                    let target_pos = Vec3::from_array(map.prefabs[target_idx].position);
-                                    let target_rot = Quat::from_array(map.prefabs[target_idx].rotation);
+                                    let target_pos =
+                                        Vec3::from_array(map.prefabs[target_idx].position);
+                                    let target_rot =
+                                        Quat::from_array(map.prefabs[target_idx].rotation);
 
                                     let rel_pos = target_pos - sel_pos;
                                     let rel_rot = sel_rot.inverse() * target_rot;
 
                                     let mut ok = false;
-                                    let target_mesh_opt = map.prefabs[target_idx].custom_mesh.clone();
+                                    let target_mesh_opt =
+                                        map.prefabs[target_idx].custom_mesh.clone();
                                     if let Some(target_mesh) = target_mesh_opt {
-                                        if let Some(ref mut custom) = map.prefabs[sel_idx].custom_mesh {
+                                        if let Some(ref mut custom) =
+                                            map.prefabs[sel_idx].custom_mesh
+                                        {
                                             custom.boolean_operation(
                                                 &target_mesh,
                                                 &geom_settings.bool_op.to_lowercase(),
@@ -2530,7 +2694,12 @@ fn map_editor_ui(
                                         reindex_prefab_markers(&map.prefabs, &mut prefab_query);
 
                                         // Adjust selected index
-                                        selection_state.selected_idx = Some(if target_idx < sel_idx { sel_idx - 1 } else { sel_idx });
+                                        selection_state.selected_idx =
+                                            Some(if target_idx < sel_idx {
+                                                sel_idx - 1
+                                            } else {
+                                                sel_idx
+                                            });
                                         geom_settings.bool_target_idx = None;
                                     }
                                 }
@@ -3314,10 +3483,16 @@ fn project_ray_onto_axis(
 fn get_building_sockets(prefab_type: &str, pos: Vec3, rot: Quat) -> Vec<(Vec3, Vec3)> {
     let local_sockets = match prefab_type {
         "floor_tile" => vec![
-            (Vec3::new(0.0, 0.1, -2.0), Vec3::new(0.0, 0.0, -1.0)), // North
-            (Vec3::new(0.0, 0.1, 2.0), Vec3::new(0.0, 0.0, 1.0)),   // South
-            (Vec3::new(2.0, 0.1, 0.0), Vec3::new(1.0, 0.0, 0.0)),   // East
-            (Vec3::new(-2.0, 0.1, 0.0), Vec3::new(-1.0, 0.0, 0.0)), // West
+            (Vec3::new(0.0, 0.0, -2.0), Vec3::new(0.0, 0.0, -1.0)), // North
+            (Vec3::new(0.0, 0.0, 2.0), Vec3::new(0.0, 0.0, 1.0)),   // South
+            (Vec3::new(2.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0)),   // East
+            (Vec3::new(-2.0, 0.0, 0.0), Vec3::new(-1.0, 0.0, 0.0)), // West
+        ],
+        "ceiling_tile" => vec![
+            (Vec3::new(0.0, 0.0, -2.0), Vec3::new(0.0, 0.0, -1.0)), // North
+            (Vec3::new(0.0, 0.0, 2.0), Vec3::new(0.0, 0.0, 1.0)),   // South
+            (Vec3::new(2.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0)),   // East
+            (Vec3::new(-2.0, 0.0, 0.0), Vec3::new(-1.0, 0.0, 0.0)), // West
         ],
         "wall_straight" | "door_frame" | "window_frame" => vec![
             (Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, -1.0, 0.0)), // Bottom
@@ -3331,9 +3506,37 @@ fn get_building_sockets(prefab_type: &str, pos: Vec3, rot: Quat) -> Vec<(Vec3, V
             (Vec3::new(2.0, 1.75, -0.1), Vec3::new(1.0, 0.0, 0.0)), // Right edge
             (Vec3::new(-0.1, 1.75, 2.0), Vec3::new(0.0, 0.0, 1.0)), // Forward edge
         ],
+        "wall_t_junction" => vec![
+            (Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, -1.0, 0.0)), // Bottom
+            (Vec3::new(0.0, 3.5, 0.0), Vec3::new(0.0, 1.0, 0.0)),  // Top
+            (Vec3::new(-2.0, 1.75, 0.0), Vec3::new(-1.0, 0.0, 0.0)), // Left
+            (Vec3::new(2.0, 1.75, 0.0), Vec3::new(1.0, 0.0, 0.0)), // Right
+            (Vec3::new(0.0, 1.75, 2.0), Vec3::new(0.0, 0.0, 1.0)), // T branch forward
+        ],
+        "wall_cross" => vec![
+            (Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, -1.0, 0.0)), // Bottom
+            (Vec3::new(0.0, 3.5, 0.0), Vec3::new(0.0, 1.0, 0.0)),  // Top
+            (Vec3::new(-2.0, 1.75, 0.0), Vec3::new(-1.0, 0.0, 0.0)), // Left
+            (Vec3::new(2.0, 1.75, 0.0), Vec3::new(1.0, 0.0, 0.0)), // Right
+            (Vec3::new(0.0, 1.75, 2.0), Vec3::new(0.0, 0.0, 1.0)), // Forward
+            (Vec3::new(0.0, 1.75, -2.0), Vec3::new(0.0, 0.0, -1.0)), // Back
+        ],
+        "hallway_segment" => vec![
+            (Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, -1.0, 0.0)), // Bottom
+            (Vec3::new(0.0, 3.5, 0.0), Vec3::new(0.0, 1.0, 0.0)),  // Top
+            (Vec3::new(0.0, 0.0, -4.0), Vec3::new(0.0, 0.0, -1.0)), // Back
+            (Vec3::new(0.0, 0.0, 4.0), Vec3::new(0.0, 0.0, 1.0)),  // Front
+        ],
+        "room_pillar" => vec![
+            (Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, -1.0, 0.0)), // Bottom
+            (Vec3::new(0.0, 3.5, 0.0), Vec3::new(0.0, 1.0, 0.0)),  // Top
+        ],
         "roof_tile" => vec![
-            (Vec3::new(0.0, 0.0, 2.0), Vec3::new(0.0, -0.5, 0.866)), // Bottom edge
-            (Vec3::new(0.0, 2.3, -2.0), Vec3::new(0.0, 0.5, -0.866)), // Top edge
+            (Vec3::new(0.0, 0.05, 1.64), Vec3::new(0.0, -0.5, 0.866)), // Bottom edge
+            (Vec3::new(0.0, 2.35, -1.64), Vec3::new(0.0, 0.5, -0.866)), // Top edge
+        ],
+        "roof_gable" => vec![
+            (Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, -1.0, 0.0)), // Bottom
         ],
         _ => vec![],
     };
@@ -3344,9 +3547,12 @@ fn get_building_sockets(prefab_type: &str, pos: Vec3, rot: Quat) -> Vec<(Vec3, V
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn calculate_snap(
     prefab_type: &str,
     cursor_pos: Vec3,
+    ray_origin: Vec3,
+    ray_dir: Vec3,
     map: &TempestMap,
     snap_grid: bool,
     grid_size: f32,
@@ -3355,7 +3561,7 @@ fn calculate_snap(
     let default_rot = Quat::IDENTITY;
 
     if snap_objects {
-        let mut best_dist = 1.2f32;
+        let mut best_dist = f32::MAX;
         let mut best_pos = None;
         let mut best_rot = None;
 
@@ -3363,34 +3569,123 @@ fn calculate_snap(
             let other_pos = Vec3::from_array(other.position);
             let other_rot = Quat::from_array(other.rotation);
 
-            if other_pos.distance(cursor_pos) > 6.0 {
+            let camera_dist = other_pos.distance(ray_origin);
+            if camera_dist > 150.0 {
                 continue;
             }
+            let threshold = (camera_dist * 0.06).clamp(1.5, 4.0);
 
             let other_sockets = get_building_sockets(&other.prefab_type, other_pos, other_rot);
             for (w_pos, w_norm) in other_sockets {
-                let dist = w_pos.distance(cursor_pos);
-                if dist < best_dist {
-                    best_dist = dist;
-                    match prefab_type {
-                        "floor_tile" => {
-                            best_pos = Some(w_pos);
-                            best_rot = Some(other_rot);
-                        }
-                        "wall_straight" | "door_frame" | "window_frame" | "wall_corner" => {
-                            best_pos = Some(w_pos);
-                            if other.prefab_type == "floor_tile" {
-                                let forward = w_norm.normalize();
-                                best_rot = Some(Quat::from_rotation_arc(Vec3::Z, forward));
-                            } else {
+                // Calculate distance from the camera ray to w_pos
+                let v = w_pos - ray_origin;
+                let proj = v.dot(ray_dir);
+                if proj > 0.0 {
+                    let closest_point_on_ray = ray_origin + ray_dir * proj;
+                    let dist = closest_point_on_ray.distance(w_pos);
+                    if dist < threshold && dist < best_dist {
+                        best_dist = dist;
+                        match prefab_type {
+                            "floor_tile" | "ceiling_tile" | "hallway_segment" => {
+                                if other.prefab_type == "floor_tile"
+                                    || other.prefab_type == "ceiling_tile"
+                                    || other.prefab_type == "hallway_segment"
+                                {
+                                    let half_dim = if prefab_type == "hallway_segment" {
+                                        4.0
+                                    } else {
+                                        2.0
+                                    };
+                                    let mut target_pos = w_pos + w_norm * half_dim;
+                                    
+                                    // Height lock: align target height exactly with parent tile
+                                    if prefab_type == "ceiling_tile" && other.prefab_type == "floor_tile" {
+                                        target_pos.y = other_pos.y + 3.5;
+                                    } else if prefab_type == "floor_tile" && other.prefab_type == "ceiling_tile" {
+                                        target_pos.y = other_pos.y - 3.5;
+                                    } else {
+                                        target_pos.y = other_pos.y;
+                                    }
+                                    best_pos = Some(target_pos);
+                                } else if (other.prefab_type == "wall_straight"
+                                    || other.prefab_type == "door_frame"
+                                    || other.prefab_type == "window_frame"
+                                    || other.prefab_type == "wall_corner"
+                                    || other.prefab_type == "wall_t_junction"
+                                    || other.prefab_type == "wall_cross")
+                                    && w_norm.y.abs() > 0.9
+                                {
+                                    // Snapping to the top/bottom of a wall.
+                                    // Offset by half-dimension along the wall's local Z-axis towards the cursor.
+                                    let local_cursor = other_rot.inverse() * (cursor_pos - w_pos);
+                                    let half_dim = if prefab_type == "hallway_segment" {
+                                        4.0
+                                    } else {
+                                        2.0
+                                    };
+                                    let z_offset = if local_cursor.z >= 0.0 { half_dim } else { -half_dim };
+                                    let offset_vec = other_rot * Vec3::new(0.0, 0.0, z_offset);
+                                    let mut target_pos = w_pos + offset_vec;
+                                    
+                                    // Align Y with the socket Y height exactly
+                                    target_pos.y = w_pos.y;
+                                    best_pos = Some(target_pos);
+                                } else {
+                                    best_pos = Some(w_pos);
+                                }
+                                best_rot = Some(other_rot);
+                            }
+                            "wall_straight" | "door_frame" | "window_frame" | "wall_corner"
+                            | "wall_t_junction" | "wall_cross" | "room_pillar" => {
+                                best_pos = Some(w_pos);
+                                if other.prefab_type == "floor_tile"
+                                    || other.prefab_type == "ceiling_tile"
+                                {
+                                    let forward = w_norm.normalize();
+                                    best_rot = Some(Quat::from_rotation_arc(Vec3::Z, forward));
+                                } else {
+                                    best_rot = Some(other_rot);
+                                }
+                            }
+                            "roof_tile" => {
+                                if other.prefab_type == "roof_tile" {
+                                    // Check local Z of normal to determine top/bottom snap
+                                    let local_norm = other_rot.inverse() * w_norm;
+                                    if local_norm.z < 0.0 {
+                                        // Snap bottom of new roof to top of old roof
+                                        best_pos = Some(w_pos - other_rot * Vec3::new(0.0, 0.05, 1.64));
+                                    } else {
+                                        // Snap top of new roof to bottom of old roof
+                                        best_pos = Some(w_pos - other_rot * Vec3::new(0.0, 2.35, -1.64));
+                                    }
+                                } else if other.prefab_type == "wall_straight"
+                                    || other.prefab_type == "door_frame"
+                                    || other.prefab_type == "window_frame"
+                                    || other.prefab_type == "wall_corner"
+                                    || other.prefab_type == "wall_t_junction"
+                                    || other.prefab_type == "wall_cross"
+                                {
+                                    let local_norm = other_rot.inverse() * w_norm;
+                                    if local_norm.y > 0.0 {
+                                        // Snap bottom of roof to top of wall
+                                        best_pos = Some(w_pos - other_rot * Vec3::new(0.0, 0.05, 1.64));
+                                    } else {
+                                        best_pos = Some(w_pos);
+                                    }
+                                } else {
+                                    best_pos = Some(w_pos);
+                                }
+                                best_rot = Some(other_rot);
+                            }
+                            "roof_gable" => {
+                                best_pos = Some(w_pos);
+                                best_rot = Some(other_rot);
+                            }
+                            _ => {
+                                best_pos = Some(w_pos);
                                 best_rot = Some(other_rot);
                             }
                         }
-                        "roof_tile" => {
-                            best_pos = Some(w_pos);
-                            best_rot = Some(other_rot);
-                        }
-                        _ => {}
                     }
                 }
             }
@@ -3404,14 +3699,57 @@ fn calculate_snap(
     if snap_grid {
         let snapped_x = (cursor_pos.x / grid_size).round() * grid_size;
         let snapped_z = (cursor_pos.z / grid_size).round() * grid_size;
-        let terrain_y = get_bilinear_height(snapped_x, snapped_z, map);
-        let snapped_y = (terrain_y / 0.5).round() * 0.5;
+        let mut base_y = get_bilinear_height(snapped_x, snapped_z, map);
+        for p in &map.prefabs {
+            let p_pos = Vec3::from_array(p.position);
+            let dx = (snapped_x - p_pos.x).abs();
+            let dz = (snapped_z - p_pos.z).abs();
+            let (w, d) = if p.prefab_type == "hallway_segment" {
+                (2.0f32, 4.0f32)
+            } else if p.prefab_type == "floor_tile" || p.prefab_type == "ceiling_tile" {
+                (2.0f32, 2.0f32)
+            } else if p.prefab_type == "wall_straight" || p.prefab_type == "door_frame" || p.prefab_type == "window_frame" {
+                (2.0f32, 0.2f32)
+            } else if p.prefab_type == "wall_corner" || p.prefab_type == "wall_t_junction" || p.prefab_type == "wall_cross" {
+                (2.0f32, 2.0f32)
+            } else if p.prefab_type == "room_pillar" {
+                (0.5f32, 0.5f32)
+            } else {
+                (0.0f32, 0.0f32)
+            };
+            if w > 0.0 && dx < w && dz < d {
+                let top_y = if p.prefab_type == "floor_tile" {
+                    p_pos.y + 0.0
+                } else if p.prefab_type == "ceiling_tile"
+                    || p.prefab_type == "hallway_segment"
+                    || p.prefab_type == "wall_straight"
+                    || p.prefab_type == "door_frame"
+                    || p.prefab_type == "window_frame"
+                    || p.prefab_type == "wall_corner"
+                    || p.prefab_type == "wall_t_junction"
+                    || p.prefab_type == "wall_cross"
+                    || p.prefab_type == "room_pillar"
+                {
+                    p_pos.y + 3.5
+                } else {
+                    p_pos.y
+                };
+                if top_y > base_y {
+                    base_y = top_y;
+                }
+            }
+        }
+        let mut snapped_y = (base_y / 0.5).round() * 0.5;
+        if (prefab_type == "ceiling_tile" || prefab_type == "roof_gable") && snapped_y < 3.0 {
+            snapped_y = 3.5;
+        }
         return (Vec3::new(snapped_x, snapped_y, snapped_z), default_rot);
     }
 
     (cursor_pos, default_rot)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn respawn_selected_prefab_mesh(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
@@ -3423,8 +3761,12 @@ fn respawn_selected_prefab_mesh(
     prefab_query: &Query<(Entity, &mut PlacedPrefabMarker)>,
     children_query: &Query<&Children>,
 ) {
-    let Some(sel_idx) = selection_state.selected_idx else { return; };
-    if sel_idx >= map.prefabs.len() { return; }
+    let Some(sel_idx) = selection_state.selected_idx else {
+        return;
+    };
+    if sel_idx >= map.prefabs.len() {
+        return;
+    }
     let prefab = &map.prefabs[sel_idx];
 
     for (entity, marker) in prefab_query.iter() {
@@ -3497,7 +3839,8 @@ fn apply_preview_material_recursive(
     preview_mat: Handle<StandardMaterial>,
     children_query: &Query<&Children>,
 ) {
-    commands.entity(entity)
+    commands
+        .entity(entity)
         .insert(MeshMaterial3d(preview_mat.clone()))
         .remove::<PointLight>();
     if let Ok(children) = children_query.get(entity) {
@@ -3520,7 +3863,12 @@ struct TerrainSculptParams<'w, 's> {
     custom_assets: Res<'w, CustomAssetLibrary>,
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::collapsible_if,
+    clippy::type_complexity,
+    clippy::needless_range_loop
+)]
 fn terrain_sculpting_system(
     params: TerrainSculptParams,
     camera_query: Query<(&Camera, &GlobalTransform), With<EditorCamera>>,
@@ -3532,9 +3880,17 @@ fn terrain_sculpting_system(
     time: Res<Time>,
     mut gizmos: Gizmos,
     mut impulse_writer: MessageWriter<WaterImpulseEvent>,
+    mut grass_writer: MessageWriter<crate::grass::GenerateGrassEvent>,
     mut prefab_query: Query<(Entity, &mut PlacedPrefabMarker)>,
     children_query: Query<&Children>,
-    mut preview_transform_query: Query<&mut Transform, (Without<EditorCamera>, Without<TerrainMesh>, Without<WaterMesh>)>,
+    mut preview_transform_query: Query<
+        &mut Transform,
+        (
+            Without<EditorCamera>,
+            Without<TerrainMesh>,
+            Without<WaterMesh>,
+        ),
+    >,
 ) {
     let TerrainSculptParams {
         mut commands,
@@ -3573,6 +3929,60 @@ fn terrain_sculpting_system(
         return;
     };
 
+    if mouse_button.just_released(MouseButton::Left) {
+        selection_state.active_drag_axis = None;
+    }
+
+    if selection_state.active_drag_axis.is_some() && mouse_button.pressed(MouseButton::Left) {
+        let i = selection_state.active_drag_axis.unwrap();
+        if let Some(sel_idx) = selection_state.selected_idx {
+            if sel_idx < map.prefabs.len() {
+                let prefab = &map.prefabs[sel_idx];
+                let pos = Vec3::from_array(prefab.position);
+                let rot = Quat::from_array(prefab.rotation);
+
+                let axes = [Vec3::X, Vec3::Y, Vec3::Z];
+                let axis_dir = rot * axes[i];
+                let ray_dir = *ray.direction;
+
+                let axis_proj = project_ray_onto_axis(ray.origin, ray_dir, pos, axis_dir);
+                let current_mouse_proj = (axis_proj - pos).dot(axis_dir);
+                let delta = current_mouse_proj - selection_state.drag_start_mouse_proj;
+
+                if selection_state.drag_scale {
+                    let mut new_scale = selection_state.drag_start_value;
+                    let start_val = selection_state.drag_start_value[i];
+                    let ratio = if selection_state.drag_start_mouse_proj.abs() > 0.05 {
+                        current_mouse_proj / selection_state.drag_start_mouse_proj
+                    } else {
+                        1.0
+                    };
+                    let mut axis_scale = start_val * ratio;
+                    if selection_state.snap_to_grid {
+                        let snap = selection_state.snap_grid_size;
+                        axis_scale = (axis_scale / snap).round() * snap;
+                    }
+                    new_scale[i] = axis_scale.max(0.1);
+                    map.prefabs[sel_idx].scale = new_scale.to_array();
+                } else {
+                    let mut new_pos = selection_state.drag_start_value + axis_dir * delta;
+                    if selection_state.snap_to_grid {
+                        let snap = selection_state.snap_grid_size;
+                        let start_pos = selection_state.drag_start_value;
+                        let local_delta = (new_pos - start_pos).dot(axis_dir);
+                        let snapped_delta = (local_delta / snap).round() * snap;
+                        new_pos = start_pos + axis_dir * snapped_delta;
+                    }
+                    map.prefabs[sel_idx].position = new_pos.to_array();
+                }
+            }
+        }
+
+        despawn_preview_entity(&mut commands, &mut selection_state, &children_query);
+        draw_gizmo_handles(&mut gizmos, &selection_state, &map);
+        return;
+    }
+
     let Some(intersection) = raycast_terrain(&ray, &map) else {
         despawn_preview_entity(&mut commands, &mut selection_state, &children_query);
         return;
@@ -3609,6 +4019,7 @@ fn terrain_sculpting_system(
             | SculptTool::PlaceModularCorner
             | SculptTool::PlaceModularFloor
             | SculptTool::PlaceModularRoof
+            | SculptTool::PlaceModularRoofGable
             | SculptTool::PlaceModularDoorFrame
             | SculptTool::PlaceModularWindowFrame
             | SculptTool::PlaceWallTJunction
@@ -3622,6 +4033,10 @@ fn terrain_sculpting_system(
             | SculptTool::PlaceFurnace
             | SculptTool::PlaceBed
             | SculptTool::PlaceTorch
+            | SculptTool::PlaceChair
+            | SculptTool::PlaceDesk
+            | SculptTool::PlaceHealthPack
+            | SculptTool::PlaceCrate
             | SculptTool::PlaceCustomAsset
             | SculptTool::PlaceCustomMesh
     );
@@ -3647,6 +4062,7 @@ fn terrain_sculpting_system(
             SculptTool::PlaceModularCorner => "wall_corner",
             SculptTool::PlaceModularFloor => "floor_tile",
             SculptTool::PlaceModularRoof => "roof_tile",
+            SculptTool::PlaceModularRoofGable => "roof_gable",
             SculptTool::PlaceModularDoorFrame => "door_frame",
             SculptTool::PlaceModularWindowFrame => "window_frame",
             SculptTool::PlaceChest => "chest",
@@ -3654,6 +4070,10 @@ fn terrain_sculpting_system(
             SculptTool::PlaceFurnace => "furnace",
             SculptTool::PlaceBed => "bed",
             SculptTool::PlaceTorch => "torch",
+            SculptTool::PlaceChair => "prop_chair",
+            SculptTool::PlaceDesk => "prop_desk",
+            SculptTool::PlaceHealthPack => "prop_health_pack",
+            SculptTool::PlaceCrate => "prop_crate",
             SculptTool::PlaceWallTJunction => "wall_t_junction",
             SculptTool::PlaceWallCross => "wall_cross",
             SculptTool::PlaceCeilingTile => "ceiling_tile",
@@ -3671,6 +4091,7 @@ fn terrain_sculpting_system(
                 | "wall_corner"
                 | "floor_tile"
                 | "roof_tile"
+                | "roof_gable"
                 | "door_frame"
                 | "window_frame"
                 | "wall_t_junction"
@@ -3683,6 +4104,8 @@ fn terrain_sculpting_system(
             let (snapped_pos, snapped_rot) = calculate_snap(
                 prefab_type,
                 intersection,
+                ray.origin,
+                *ray.direction,
                 &map,
                 selection_state.snap_to_grid,
                 selection_state.snap_grid_size,
@@ -3690,7 +4113,37 @@ fn terrain_sculpting_system(
             );
             (snapped_pos, snapped_rot, Vec3::ONE)
         } else {
-            (intersection, Quat::IDENTITY, Vec3::ONE)
+            let is_prop = matches!(
+                prefab_type,
+                "chest"
+                    | "workbench"
+                    | "furnace"
+                    | "bed"
+                    | "torch"
+                    | "fluorescent_light"
+                    | "prop_chair"
+                    | "prop_desk"
+                    | "prop_health_pack"
+                    | "prop_crate"
+            );
+            let rot_y = if is_prop {
+                let camera_forward = if let Ok((_, cam_gt)) = camera_query.single() {
+                    let f = cam_gt.forward();
+                    Vec3::new(f.x, 0.0, f.z).normalize_or_zero()
+                } else {
+                    Vec3::NEG_Z
+                };
+                if camera_forward != Vec3::ZERO {
+                    let angle = camera_forward.z.atan2(camera_forward.x);
+                    -angle - std::f32::consts::FRAC_PI_2
+                } else {
+                    0.0
+                }
+            } else {
+                let seed = (intersection.x * 12.9898 + intersection.z * 78.233).sin() * 43758.5453;
+                seed.fract() * std::f32::consts::TAU
+            };
+            (intersection, Quat::from_rotation_y(rot_y), Vec3::ONE)
         };
 
         let tex_override: Option<&str> = if prefab_type == "custom_asset" {
@@ -3924,424 +4377,572 @@ fn terrain_sculpting_system(
                     force: brush.strength * 0.04 * dt,
                     radius: brush.size * 0.6,
                 });
+
+                // Regenerate grass to match new heights
+                grass_writer.write(crate::grass::GenerateGrassEvent);
             }
         }
     } else if !is_sculpt_tool && mouse_button.just_pressed(MouseButton::Left) {
-        // Place or Delete Prefab
-        let is_placement = matches!(
-            brush.tool,
-            SculptTool::PlaceTreeOak
-                | SculptTool::PlaceTreePine
-                | SculptTool::PlaceTreeBirch
-                | SculptTool::PlaceShrub
-                | SculptTool::PlaceCactus
-                | SculptTool::PlaceRock
-                | SculptTool::PlaceSpawnPoint
-                | SculptTool::PlaceHouse
-                | SculptTool::PlaceOreCopper
-                | SculptTool::PlaceOreIron
-                | SculptTool::PlaceOreGold
-                | SculptTool::PlaceOreSilver
-                | SculptTool::PlaceOrePlatinum
-                | SculptTool::PlaceOreSteel
-                | SculptTool::PlaceOreGranite
-                | SculptTool::PlaceModularWall
-                | SculptTool::PlaceModularCorner
-                | SculptTool::PlaceModularFloor
-                | SculptTool::PlaceModularRoof
-                | SculptTool::PlaceModularDoorFrame
-                | SculptTool::PlaceModularWindowFrame
-                | SculptTool::PlaceWallTJunction
-                | SculptTool::PlaceWallCross
-                | SculptTool::PlaceCeilingTile
-                | SculptTool::PlaceFluorescentLight
-                | SculptTool::PlaceHallwaySegment
-                | SculptTool::PlaceRoomPillar
-                | SculptTool::PlaceChest
-                | SculptTool::PlaceWorkbench
-                | SculptTool::PlaceFurnace
-                | SculptTool::PlaceBed
-                | SculptTool::PlaceTorch
-                | SculptTool::PlaceCustomAsset
-                | SculptTool::PlaceCustomMesh
-        );
+        let mut handle_clicked = false;
+        if brush.tool == SculptTool::SelectObject {
+            if let Some(sel_idx) = selection_state.selected_idx {
+                if sel_idx < map.prefabs.len() {
+                    let prefab = &map.prefabs[sel_idx];
+                    let pos = Vec3::from_array(prefab.position);
+                    let rot = Quat::from_array(prefab.rotation);
+                    let scale = Vec3::from_array(prefab.scale);
 
-        if is_placement {
-            let prefab_type = match brush.tool {
-                SculptTool::PlaceTreeOak => "tree_oak",
-                SculptTool::PlaceTreePine => "tree_pine",
-                SculptTool::PlaceTreeBirch => "tree_birch",
-                SculptTool::PlaceShrub => "shrub",
-                SculptTool::PlaceCactus => "cactus",
-                SculptTool::PlaceRock => "rock",
-                SculptTool::PlaceSpawnPoint => "spawn_point",
-                SculptTool::PlaceHouse => "house",
-                SculptTool::PlaceOreCopper => "ore_copper",
-                SculptTool::PlaceOreIron => "ore_iron",
-                SculptTool::PlaceOreGold => "ore_gold",
-                SculptTool::PlaceOreSilver => "ore_silver",
-                SculptTool::PlaceOrePlatinum => "ore_platinum",
-                SculptTool::PlaceOreSteel => "ore_steel",
-                SculptTool::PlaceOreGranite => "ore_granite",
-                SculptTool::PlaceModularWall => "wall_straight",
-                SculptTool::PlaceModularCorner => "wall_corner",
-                SculptTool::PlaceModularFloor => "floor_tile",
-                SculptTool::PlaceModularRoof => "roof_tile",
-                SculptTool::PlaceModularDoorFrame => "door_frame",
-                SculptTool::PlaceModularWindowFrame => "window_frame",
-                SculptTool::PlaceChest => "chest",
-                SculptTool::PlaceWorkbench => "workbench",
-                SculptTool::PlaceFurnace => "furnace",
-                SculptTool::PlaceBed => "bed",
-                SculptTool::PlaceTorch => "torch",
-                SculptTool::PlaceWallTJunction => "wall_t_junction",
-                SculptTool::PlaceWallCross => "wall_cross",
-                SculptTool::PlaceCeilingTile => "ceiling_tile",
-                SculptTool::PlaceFluorescentLight => "fluorescent_light",
-                SculptTool::PlaceHallwaySegment => "hallway_segment",
-                SculptTool::PlaceRoomPillar => "room_pillar",
-                SculptTool::PlaceCustomAsset => "custom_asset",
-                SculptTool::PlaceCustomMesh => "custom_mesh",
-                _ => unreachable!(),
-            };
+                    let axes = [Vec3::X, Vec3::Y, Vec3::Z];
+                    let ray_dir = *ray.direction;
 
-            // For modular building blocks, use snapping system
-            let is_modular = matches!(
-                prefab_type,
-                "wall_straight"
-                    | "wall_corner"
-                    | "floor_tile"
-                    | "roof_tile"
-                    | "door_frame"
-                    | "window_frame"
-                    | "wall_t_junction"
-                    | "wall_cross"
-                    | "ceiling_tile"
-                    | "hallway_segment"
-            );
+                    for i in 0..3 {
+                        let axis_dir = rot * axes[i];
+                        let axis_len = 2.0;
+                        let scale_handle_pos = pos + axis_dir * axis_len;
 
-            // Single-house constraint: remove any previously placed house
-            if prefab_type == "house" {
-                map.prefabs.retain(|p| p.prefab_type != "house");
-                for (entity, marker) in prefab_query.iter() {
-                    if marker.prefab_type == "house" {
-                        if let Ok(children) = children_query.get(entity) {
-                            for child in children.iter() {
-                                commands.entity(child).despawn();
+                        // 1. Scale handle detection
+                        let ray_to_handle = scale_handle_pos - ray.origin;
+                        let proj = ray_to_handle.dot(ray_dir);
+                        if proj > 0.0 {
+                            let closest_point_on_ray = ray.origin + ray_dir * proj;
+                            let dist_to_handle = closest_point_on_ray.distance(scale_handle_pos);
+                            if dist_to_handle < 0.35 {
+                                selection_state.active_drag_axis = Some(i);
+                                selection_state.drag_scale = true;
+                                selection_state.drag_start_value = scale;
+                                let axis_proj =
+                                    project_ray_onto_axis(ray.origin, ray_dir, pos, axis_dir);
+                                selection_state.drag_start_mouse_proj =
+                                    (axis_proj - pos).dot(axis_dir);
+                                handle_clicked = true;
+                                break;
                             }
                         }
-                        commands.entity(entity).despawn();
-                    }
-                }
-            }
 
-            // Calculate position and rotation based on snapping or random rotation
-            let (place_pos, rotation, scale) = if is_modular {
-                let (snapped_pos, snapped_rot) = calculate_snap(
-                    prefab_type,
-                    intersection,
-                    &map,
-                    selection_state.snap_to_grid,
-                    selection_state.snap_grid_size,
-                    selection_state.snap_to_objects,
-                );
-                (snapped_pos, snapped_rot, Vec3::ONE)
-            } else {
-                let rot_y = rand::random::<f32>() * std::f32::consts::TAU;
-                (intersection, Quat::from_rotation_y(rot_y), Vec3::ONE)
-            };
-
-            // For custom assets, store the file path in texture_override
-            let tex_override: Option<&str> = if prefab_type == "custom_asset" {
-                custom_assets
-                    .selected_asset_idx
-                    .and_then(|i| custom_assets.assets.get(i))
-                    .map(|entry| entry.file_path.as_str())
-            } else {
-                None
-            };
-
-            let custom_mesh_data = if prefab_type == "custom_mesh" {
-                Some(EditableMesh::new_cube(2.0))
-            } else {
-                None
-            };
-
-            let new_index = map.prefabs.len();
-            spawn_prefab_visuals(
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                prefab_type,
-                place_pos,
-                rotation,
-                scale,
-                tex_override,
-                &mansion_settings,
-                new_index,
-                &asset_server,
-                custom_mesh_data.as_ref(),
-            );
-
-            map.prefabs.push(PlacedPrefab {
-                prefab_type: prefab_type.to_string(),
-                position: place_pos.to_array(),
-                rotation: rotation.to_array(),
-                scale: scale.to_array(),
-                texture_override: tex_override.map(|s| s.to_string()),
-                rotation_y: None,
-                custom_mesh: custom_mesh_data,
-            });
-
-            // If placing a modular piece, clear overlapping natural obstacles (trees, rocks, shrubs, cacti, ores)
-            if is_modular {
-                let clear_radius = match prefab_type {
-                    "hallway_segment" => 4.5f32,
-                    _ => 2.2f32,
-                };
-                
-                let mut idx_to_remove = Vec::new();
-                for (idx, p) in map.prefabs.iter().enumerate() {
-                    if idx == map.prefabs.len() - 1 {
-                        continue;
-                    }
-                    let p_type = &p.prefab_type;
-                    if p_type.starts_with("tree") || p_type == "rock" || p_type == "shrub" || p_type == "cactus" || p_type.starts_with("ore_") {
-                        let p_pos = Vec3::from_array(p.position);
-                        if place_pos.distance(p_pos) < clear_radius {
-                            idx_to_remove.push(idx);
-                        }
-                    }
-                }
-                
-                if !idx_to_remove.is_empty() {
-                    idx_to_remove.sort_by(|a, b| b.cmp(a));
-                    for &idx in idx_to_remove.iter() {
-                        let removed = map.prefabs.remove(idx);
-                        let removed_pos = Vec3::from_array(removed.position);
-                        for (entity, marker) in prefab_query.iter() {
-                            if marker.position.distance(removed_pos) < 0.1 {
-                                if let Ok(children_list) = children_query.get(entity) {
-                                    for child in children_list.iter() {
-                                        commands.entity(child).despawn();
-                                    }
-                                }
-                                commands.entity(entity).despawn();
+                        // 2. Translation handle detection
+                        let axis_proj = project_ray_onto_axis(ray.origin, ray_dir, pos, axis_dir);
+                        let s = (axis_proj - pos).dot(axis_dir);
+                        if s >= 0.0 && s <= axis_len {
+                            let closest_point_on_ray =
+                                ray.origin + ray_dir * (axis_proj - ray.origin).dot(ray_dir);
+                            let dist_to_axis = closest_point_on_ray.distance(axis_proj);
+                            if dist_to_axis < 0.25 {
+                                selection_state.active_drag_axis = Some(i);
+                                selection_state.drag_scale = false;
+                                selection_state.drag_start_value = pos;
+                                selection_state.drag_start_mouse_proj = s;
+                                handle_clicked = true;
                                 break;
                             }
                         }
                     }
                 }
             }
+        }
 
-            // If placing a house, clear overlapping vegetation and flatten terrain
-            if prefab_type == "house" {
-                let half_w = (mansion_settings.cols as f32 * mansion_settings.cell_size) / 2.0;
-                let half_d = (mansion_settings.rows as f32 * mansion_settings.cell_size) / 2.0;
+        if !handle_clicked {
+            // Place or Delete Prefab
+            let is_placement = matches!(
+                brush.tool,
+                SculptTool::PlaceTreeOak
+                    | SculptTool::PlaceTreePine
+                    | SculptTool::PlaceTreeBirch
+                    | SculptTool::PlaceShrub
+                    | SculptTool::PlaceCactus
+                    | SculptTool::PlaceRock
+                    | SculptTool::PlaceSpawnPoint
+                    | SculptTool::PlaceHouse
+                    | SculptTool::PlaceOreCopper
+                    | SculptTool::PlaceOreIron
+                    | SculptTool::PlaceOreGold
+                    | SculptTool::PlaceOreSilver
+                    | SculptTool::PlaceOrePlatinum
+                    | SculptTool::PlaceOreSteel
+                    | SculptTool::PlaceOreGranite
+                    | SculptTool::PlaceModularWall
+                    | SculptTool::PlaceModularCorner
+                    | SculptTool::PlaceModularFloor
+                    | SculptTool::PlaceModularRoof
+                    | SculptTool::PlaceModularRoofGable
+                    | SculptTool::PlaceModularDoorFrame
+                    | SculptTool::PlaceModularWindowFrame
+                    | SculptTool::PlaceWallTJunction
+                    | SculptTool::PlaceWallCross
+                    | SculptTool::PlaceCeilingTile
+                    | SculptTool::PlaceFluorescentLight
+                    | SculptTool::PlaceHallwaySegment
+                    | SculptTool::PlaceRoomPillar
+                    | SculptTool::PlaceChest
+                    | SculptTool::PlaceWorkbench
+                    | SculptTool::PlaceFurnace
+                    | SculptTool::PlaceBed
+                    | SculptTool::PlaceTorch
+                    | SculptTool::PlaceChair
+                    | SculptTool::PlaceDesk
+                    | SculptTool::PlaceHealthPack
+                    | SculptTool::PlaceCrate
+                    | SculptTool::PlaceCustomAsset
+                    | SculptTool::PlaceCustomMesh
+            );
 
-                // 1. Remove overlapping prefabs from map data
-                map.prefabs.retain(|p| {
-                    if p.prefab_type == "house" || p.prefab_type == "spawn_point" {
-                        return true;
+            if is_placement {
+                let prefab_type = match brush.tool {
+                    SculptTool::PlaceTreeOak => "tree_oak",
+                    SculptTool::PlaceTreePine => "tree_pine",
+                    SculptTool::PlaceTreeBirch => "tree_birch",
+                    SculptTool::PlaceShrub => "shrub",
+                    SculptTool::PlaceCactus => "cactus",
+                    SculptTool::PlaceRock => "rock",
+                    SculptTool::PlaceSpawnPoint => "spawn_point",
+                    SculptTool::PlaceHouse => "house",
+                    SculptTool::PlaceOreCopper => "ore_copper",
+                    SculptTool::PlaceOreIron => "ore_iron",
+                    SculptTool::PlaceOreGold => "ore_gold",
+                    SculptTool::PlaceOreSilver => "ore_silver",
+                    SculptTool::PlaceOrePlatinum => "ore_platinum",
+                    SculptTool::PlaceOreSteel => "ore_steel",
+                    SculptTool::PlaceOreGranite => "ore_granite",
+                    SculptTool::PlaceModularWall => "wall_straight",
+                    SculptTool::PlaceModularCorner => "wall_corner",
+                    SculptTool::PlaceModularFloor => "floor_tile",
+                    SculptTool::PlaceModularRoof => "roof_tile",
+                    SculptTool::PlaceModularRoofGable => "roof_gable",
+                    SculptTool::PlaceModularDoorFrame => "door_frame",
+                    SculptTool::PlaceModularWindowFrame => "window_frame",
+                    SculptTool::PlaceChest => "chest",
+                    SculptTool::PlaceWorkbench => "workbench",
+                    SculptTool::PlaceFurnace => "furnace",
+                    SculptTool::PlaceBed => "bed",
+                    SculptTool::PlaceTorch => "torch",
+                    SculptTool::PlaceChair => "prop_chair",
+                    SculptTool::PlaceDesk => "prop_desk",
+                    SculptTool::PlaceHealthPack => "prop_health_pack",
+                    SculptTool::PlaceCrate => "prop_crate",
+                    SculptTool::PlaceWallTJunction => "wall_t_junction",
+                    SculptTool::PlaceWallCross => "wall_cross",
+                    SculptTool::PlaceCeilingTile => "ceiling_tile",
+                    SculptTool::PlaceFluorescentLight => "fluorescent_light",
+                    SculptTool::PlaceHallwaySegment => "hallway_segment",
+                    SculptTool::PlaceRoomPillar => "room_pillar",
+                    SculptTool::PlaceCustomAsset => "custom_asset",
+                    SculptTool::PlaceCustomMesh => "custom_mesh",
+                    _ => unreachable!(),
+                };
+
+                // For modular building blocks, use snapping system
+                let is_modular = matches!(
+                    prefab_type,
+                    "wall_straight"
+                        | "wall_corner"
+                        | "floor_tile"
+                        | "roof_tile"
+                        | "roof_gable"
+                        | "door_frame"
+                        | "window_frame"
+                        | "wall_t_junction"
+                        | "wall_cross"
+                        | "ceiling_tile"
+                        | "hallway_segment"
+                );
+
+                // Single-house constraint: remove any previously placed house
+                if prefab_type == "house" {
+                    map.prefabs.retain(|p| p.prefab_type != "house");
+                    for (entity, marker) in prefab_query.iter() {
+                        if marker.prefab_type == "house" {
+                            if let Ok(children) = children_query.get(entity) {
+                                for child in children.iter() {
+                                    commands.entity(child).despawn();
+                                }
+                            }
+                            commands.entity(entity).despawn();
+                        }
                     }
-                    let p_pos = Vec3::from_array(p.position);
-                    let inside = (p_pos.x - intersection.x).abs() < half_w + 1.0
-                        && (p_pos.z - intersection.z).abs() < half_d + 1.0;
-                    !inside
+                }
+
+                // Calculate position and rotation based on snapping or random rotation
+                let (place_pos, rotation, scale) = if is_modular {
+                    let (snapped_pos, snapped_rot) = calculate_snap(
+                        prefab_type,
+                        intersection,
+                        ray.origin,
+                        *ray.direction,
+                        &map,
+                        selection_state.snap_to_grid,
+                        selection_state.snap_grid_size,
+                        selection_state.snap_to_objects,
+                    );
+                    (snapped_pos, snapped_rot, Vec3::ONE)
+                } else {
+                    let is_prop = matches!(
+                        prefab_type,
+                        "chest"
+                            | "workbench"
+                            | "furnace"
+                            | "bed"
+                            | "torch"
+                            | "fluorescent_light"
+                            | "prop_chair"
+                            | "prop_desk"
+                            | "prop_health_pack"
+                            | "prop_crate"
+                    );
+                    let rot_y = if is_prop {
+                        let camera_forward = if let Ok((_, cam_gt)) = camera_query.single() {
+                            let f = cam_gt.forward();
+                            Vec3::new(f.x, 0.0, f.z).normalize_or_zero()
+                        } else {
+                            Vec3::NEG_Z
+                        };
+                        if camera_forward != Vec3::ZERO {
+                            let angle = camera_forward.z.atan2(camera_forward.x);
+                            -angle - std::f32::consts::FRAC_PI_2
+                        } else {
+                            0.0
+                        }
+                    } else {
+                        let seed = (intersection.x * 12.9898 + intersection.z * 78.233).sin() * 43758.5453;
+                        seed.fract() * std::f32::consts::TAU
+                    };
+                    (intersection, Quat::from_rotation_y(rot_y), Vec3::ONE)
+                };
+
+                // For custom assets, store the file path in texture_override
+                let tex_override: Option<&str> = if prefab_type == "custom_asset" {
+                    custom_assets
+                        .selected_asset_idx
+                        .and_then(|i| custom_assets.assets.get(i))
+                        .map(|entry| entry.file_path.as_str())
+                } else {
+                    None
+                };
+
+                let custom_mesh_data = if prefab_type == "custom_mesh" {
+                    Some(EditableMesh::new_cube(2.0))
+                } else {
+                    None
+                };
+
+                let new_index = map.prefabs.len();
+                spawn_prefab_visuals(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    prefab_type,
+                    place_pos,
+                    rotation,
+                    scale,
+                    tex_override,
+                    &mansion_settings,
+                    new_index,
+                    &asset_server,
+                    custom_mesh_data.as_ref(),
+                );
+
+                map.prefabs.push(PlacedPrefab {
+                    prefab_type: prefab_type.to_string(),
+                    position: place_pos.to_array(),
+                    rotation: rotation.to_array(),
+                    scale: scale.to_array(),
+                    texture_override: tex_override.map(|s| s.to_string()),
+                    rotation_y: None,
+                    custom_mesh: custom_mesh_data,
                 });
 
-                // 2. Despawn overlapping visual entities in editor
-                for (entity, marker) in prefab_query.iter() {
-                    if marker.prefab_type == "house" || marker.prefab_type == "spawn_point" {
-                        continue;
-                    }
-                    let inside = (marker.position.x - intersection.x).abs() < half_w + 1.0
-                        && (marker.position.z - intersection.z).abs() < half_d + 1.0;
-                    if inside {
-                        if let Ok(children) = children_query.get(entity) {
-                            for child in children.iter() {
-                                commands.entity(child).despawn();
+                // If placing a modular piece, clear overlapping natural obstacles (trees, rocks, shrubs, cacti, ores)
+                if is_modular {
+                    let clear_radius = match prefab_type {
+                        "hallway_segment" => 4.5f32,
+                        _ => 2.2f32,
+                    };
+
+                    let mut idx_to_remove = Vec::new();
+                    for (idx, p) in map.prefabs.iter().enumerate() {
+                        if idx == map.prefabs.len() - 1 {
+                            continue;
+                        }
+                        let p_type = &p.prefab_type;
+                        if p_type.starts_with("tree")
+                            || p_type == "rock"
+                            || p_type == "shrub"
+                            || p_type == "cactus"
+                            || p_type.starts_with("ore_")
+                        {
+                            let p_pos = Vec3::from_array(p.position);
+                            if place_pos.distance(p_pos) < clear_radius {
+                                idx_to_remove.push(idx);
                             }
                         }
-                        commands.entity(entity).despawn();
                     }
-                }
 
-                // 3. Flatten terrain under the house footprint
-                let half_map_w = map.width as f32 / 2.0;
-                let half_map_h = map.height as f32 / 2.0;
-
-                let min_x_idx = ((intersection.x - half_w - 2.0) + half_map_w).max(0.0) as u32;
-                let max_x_idx =
-                    ((intersection.x + half_w + 2.0) + half_map_w).min(map.width as f32) as u32;
-                let min_z_idx = ((intersection.z - half_d - 2.0) + half_map_h).max(0.0) as u32;
-                let max_z_idx =
-                    ((intersection.z + half_d + 2.0) + half_map_h).min(map.height as f32) as u32;
-
-                for mz in min_z_idx..max_z_idx {
-                    for mx in min_x_idx..max_x_idx {
-                        map.set_height(mx, mz, 1.5);
-                        map.set_biome(mx, mz, Biome::Temperate);
-                    }
-                }
-
-                // Rebuild terrain mesh in-place
-                for (terrain_entity, _) in terrain_query.iter() {
-                    rebuild_terrain_mesh(
-                        terrain_entity,
-                        &mut commands,
-                        &map,
-                        &settings,
-                        &mut meshes,
-                    );
-                }
-            }
-
-            // Flatten terrain under floor tiles and hallway segments
-            if prefab_type == "floor_tile" || prefab_type == "hallway_segment" {
-                let (fw, fd) = if prefab_type == "hallway_segment" {
-                    (4.0f32, 8.0f32)
-                } else {
-                    (4.0f32, 4.0f32)
-                };
-                let half_fw = fw / 2.0;
-                let half_fd = fd / 2.0;
-                let floor_y = place_pos.y;
-                let half_map_w = map.width as f32 / 2.0;
-                let half_map_h = map.height as f32 / 2.0;
-
-                let min_x_idx = ((place_pos.x - half_fw - 1.0) + half_map_w).max(0.0) as u32;
-                let max_x_idx =
-                    ((place_pos.x + half_fw + 1.0) + half_map_w).min(map.width as f32) as u32;
-                let min_z_idx = ((place_pos.z - half_fd - 1.0) + half_map_h).max(0.0) as u32;
-                let max_z_idx =
-                    ((place_pos.z + half_fd + 1.0) + half_map_h).min(map.height as f32) as u32;
-
-                for mz in min_z_idx..max_z_idx {
-                    for mx in min_x_idx..max_x_idx {
-                        let current_h = map.get_height(mx, mz);
-                        if current_h > floor_y {
-                            map.set_height(mx, mz, floor_y);
-                        }
-                    }
-                }
-
-                for (terrain_entity, _) in terrain_query.iter() {
-                    rebuild_terrain_mesh(
-                        terrain_entity,
-                        &mut commands,
-                        &map,
-                        &settings,
-                        &mut meshes,
-                    );
-                }
-            }
-            reindex_prefab_markers(&map.prefabs, &mut prefab_query);
-        } else if brush.tool == SculptTool::DeletePrefab {
-            // Find closest prefab within 2.0 meters
-            let mut closest_idx: Option<usize> = None;
-            let mut closest_dist = 2.0;
-
-            for (idx, p) in map.prefabs.iter().enumerate() {
-                let p_pos = Vec3::from_array(p.position);
-                let dist = intersection.distance(p_pos);
-                if dist < closest_dist {
-                    closest_dist = dist;
-                    closest_idx = Some(idx);
-                }
-            }
-
-            if let Some(idx) = closest_idx {
-                let p_pos = Vec3::from_array(map.prefabs[idx].position);
-                // Despawn 3D parent entity and its child meshes
-                for (entity, marker) in prefab_query.iter() {
-                    if marker.position.distance(p_pos) < 0.05 {
-                        if let Ok(children) = children_query.get(entity) {
-                            for child in children.iter() {
-                                commands.entity(child).despawn();
+                    if !idx_to_remove.is_empty() {
+                        idx_to_remove.sort_by(|a, b| b.cmp(a));
+                        for &idx in idx_to_remove.iter() {
+                            let removed = map.prefabs.remove(idx);
+                            let removed_pos = Vec3::from_array(removed.position);
+                            for (entity, marker) in prefab_query.iter() {
+                                if marker.position.distance(removed_pos) < 0.1 {
+                                    if let Ok(children_list) = children_query.get(entity) {
+                                        for child in children_list.iter() {
+                                            commands.entity(child).despawn();
+                                        }
+                                    }
+                                    commands.entity(entity).despawn();
+                                    break;
+                                }
                             }
                         }
-                        commands.entity(entity).despawn();
-                        break;
                     }
                 }
-                map.prefabs.remove(idx);
-            }
-            reindex_prefab_markers(&map.prefabs, &mut prefab_query);
-        } else if brush.tool == SculptTool::SelectObject {
-            // Find closest prefab within 3.0 meters and select it
-            let mut closest_idx: Option<usize> = None;
-            let mut closest_dist = 3.0f32;
 
-            for (idx, p) in map.prefabs.iter().enumerate() {
-                let p_pos = Vec3::from_array(p.position);
-                let dist = intersection.distance(p_pos);
-                if dist < closest_dist {
-                    closest_dist = dist;
-                    closest_idx = Some(idx);
+                // If placing a house, clear overlapping vegetation and flatten terrain
+                if prefab_type == "house" {
+                    let half_w = (mansion_settings.cols as f32 * mansion_settings.cell_size) / 2.0;
+                    let half_d = (mansion_settings.rows as f32 * mansion_settings.cell_size) / 2.0;
+
+                    // 1. Remove overlapping prefabs from map data
+                    map.prefabs.retain(|p| {
+                        if p.prefab_type == "house" || p.prefab_type == "spawn_point" {
+                            return true;
+                        }
+                        let p_pos = Vec3::from_array(p.position);
+                        let inside = (p_pos.x - intersection.x).abs() < half_w + 1.0
+                            && (p_pos.z - intersection.z).abs() < half_d + 1.0;
+                        !inside
+                    });
+
+                    // 2. Despawn overlapping visual entities in editor
+                    for (entity, marker) in prefab_query.iter() {
+                        if marker.prefab_type == "house" || marker.prefab_type == "spawn_point" {
+                            continue;
+                        }
+                        let inside = (marker.position.x - intersection.x).abs() < half_w + 1.0
+                            && (marker.position.z - intersection.z).abs() < half_d + 1.0;
+                        if inside {
+                            if let Ok(children) = children_query.get(entity) {
+                                for child in children.iter() {
+                                    commands.entity(child).despawn();
+                                }
+                            }
+                            commands.entity(entity).despawn();
+                        }
+                    }
+
+                    // 3. Flatten terrain under the house footprint
+                    let half_map_w = map.width as f32 / 2.0;
+                    let half_map_h = map.height as f32 / 2.0;
+
+                    let min_x_idx = ((intersection.x - half_w - 2.0) + half_map_w).max(0.0) as u32;
+                    let max_x_idx =
+                        ((intersection.x + half_w + 2.0) + half_map_w).min(map.width as f32) as u32;
+                    let min_z_idx = ((intersection.z - half_d - 2.0) + half_map_h).max(0.0) as u32;
+                    let max_z_idx = ((intersection.z + half_d + 2.0) + half_map_h)
+                        .min(map.height as f32) as u32;
+
+                    for mz in min_z_idx..max_z_idx {
+                        for mx in min_x_idx..max_x_idx {
+                            map.set_height(mx, mz, 1.5);
+                            map.set_biome(mx, mz, Biome::Temperate);
+                        }
+                    }
+
+                    // Rebuild terrain mesh in-place
+                    for (terrain_entity, _) in terrain_query.iter() {
+                        rebuild_terrain_mesh(
+                            terrain_entity,
+                            &mut commands,
+                            &map,
+                            &settings,
+                            &mut meshes,
+                        );
+                    }
                 }
-            }
 
-            selection_state.selected_idx = closest_idx;
-        }
+                // Flatten terrain under floor tiles and hallway segments
+                if prefab_type == "floor_tile" || prefab_type == "hallway_segment" {
+                    let (fw, fd) = if prefab_type == "hallway_segment" {
+                        (4.0f32, 8.0f32)
+                    } else {
+                        (4.0f32, 4.0f32)
+                    };
+                    let half_fw = fw / 2.0;
+                    let half_fd = fd / 2.0;
+                    let floor_y = place_pos.y;
+                    let half_map_w = map.width as f32 / 2.0;
+                    let half_map_h = map.height as f32 / 2.0;
+
+                    let min_x_idx = ((place_pos.x - half_fw - 1.0) + half_map_w).max(0.0) as u32;
+                    let max_x_idx =
+                        ((place_pos.x + half_fw + 1.0) + half_map_w).min(map.width as f32) as u32;
+                    let min_z_idx = ((place_pos.z - half_fd - 1.0) + half_map_h).max(0.0) as u32;
+                    let max_z_idx =
+                        ((place_pos.z + half_fd + 1.0) + half_map_h).min(map.height as f32) as u32;
+
+                    for mz in min_z_idx..max_z_idx {
+                        for mx in min_x_idx..max_x_idx {
+                            let current_h = map.get_height(mx, mz);
+                            if current_h > floor_y {
+                                map.set_height(mx, mz, floor_y);
+                            }
+                        }
+                    }
+
+                    for (terrain_entity, _) in terrain_query.iter() {
+                        rebuild_terrain_mesh(
+                            terrain_entity,
+                            &mut commands,
+                            &map,
+                            &settings,
+                            &mut meshes,
+                        );
+                    }
+                }
+                reindex_prefab_markers(&map.prefabs, &mut prefab_query);
+            } else if brush.tool == SculptTool::DeletePrefab {
+                // Find closest prefab within 2.0 meters
+                let mut closest_idx: Option<usize> = None;
+                let mut closest_dist = 2.0;
+
+                for (idx, p) in map.prefabs.iter().enumerate() {
+                    let p_pos = Vec3::from_array(p.position);
+                    let dist = intersection.distance(p_pos);
+                    if dist < closest_dist {
+                        closest_dist = dist;
+                        closest_idx = Some(idx);
+                    }
+                }
+
+                if let Some(idx) = closest_idx {
+                    let p_pos = Vec3::from_array(map.prefabs[idx].position);
+                    // Despawn 3D parent entity and its child meshes
+                    for (entity, marker) in prefab_query.iter() {
+                        if marker.position.distance(p_pos) < 0.05 {
+                            if let Ok(children) = children_query.get(entity) {
+                                for child in children.iter() {
+                                    commands.entity(child).despawn();
+                                }
+                            }
+                            commands.entity(entity).despawn();
+                            break;
+                        }
+                    }
+                    map.prefabs.remove(idx);
+                }
+                reindex_prefab_markers(&map.prefabs, &mut prefab_query);
+            } else if brush.tool == SculptTool::SelectObject {
+                // Find closest prefab within 3.0 meters and select it
+                let mut closest_idx: Option<usize> = None;
+                let mut closest_dist = 3.0f32;
+
+                for (idx, p) in map.prefabs.iter().enumerate() {
+                    let p_pos = Vec3::from_array(p.position);
+                    let dist = intersection.distance(p_pos);
+                    if dist < closest_dist {
+                        closest_dist = dist;
+                        closest_idx = Some(idx);
+                    }
+                }
+
+                selection_state.selected_idx = closest_idx;
+            }
+        } // close of if !handle_clicked
     }
 
     // Draw gizmo axes around selected object
-    if let Some(sel_idx) = selection_state.selected_idx {
-        if sel_idx < map.prefabs.len() {
-            let sel = &map.prefabs[sel_idx];
-            let pos = Vec3::from_array(sel.position);
-            let rot = Quat::from_array(sel.rotation);
+    draw_gizmo_handles(&mut gizmos, &selection_state, &map);
+}
 
-            let axis_len = 2.0;
-            // X axis - Red
-            gizmos.line(
-                pos,
-                pos + rot * Vec3::X * axis_len,
-                Color::srgb(1.0, 0.0, 0.0),
-            );
-            // Y axis - Green
-            gizmos.line(
-                pos,
-                pos + rot * Vec3::Y * axis_len,
-                Color::srgb(0.0, 1.0, 0.0),
-            );
-            // Z axis - Blue
-            gizmos.line(
-                pos,
-                pos + rot * Vec3::Z * axis_len,
-                Color::srgb(0.0, 0.0, 1.0),
-            );
+fn draw_gizmo_handles(gizmos: &mut Gizmos, selection_state: &SelectionState, map: &TempestMap) {
+    let Some(sel_idx) = selection_state.selected_idx else {
+        return;
+    };
+    if sel_idx >= map.prefabs.len() {
+        return;
+    }
 
-            // Selection wireframe box
-            let scale = Vec3::from_array(sel.scale);
-            let half = scale * 0.5;
-            let corners = [
-                pos + rot * Vec3::new(-half.x, 0.0, -half.z),
-                pos + rot * Vec3::new(half.x, 0.0, -half.z),
-                pos + rot * Vec3::new(half.x, 0.0, half.z),
-                pos + rot * Vec3::new(-half.x, 0.0, half.z),
-                pos + rot * Vec3::new(-half.x, half.y * 2.0, -half.z),
-                pos + rot * Vec3::new(half.x, half.y * 2.0, -half.z),
-                pos + rot * Vec3::new(half.x, half.y * 2.0, half.z),
-                pos + rot * Vec3::new(-half.x, half.y * 2.0, half.z),
-            ];
-            let sel_color = Color::srgb(1.0, 1.0, 0.0);
-            // Bottom face
-            for i in 0..4 {
-                gizmos.line(corners[i], corners[(i + 1) % 4], sel_color);
-            }
-            // Top face
-            for i in 4..8 {
-                gizmos.line(corners[i], corners[4 + (i - 4 + 1) % 4], sel_color);
-            }
-            // Verticals
-            for i in 0..4 {
-                gizmos.line(corners[i], corners[i + 4], sel_color);
-            }
-        } else {
-            selection_state.selected_idx = None;
-        }
+    let sel = &map.prefabs[sel_idx];
+    let pos = Vec3::from_array(sel.position);
+    let rot = Quat::from_array(sel.rotation);
+    let scale = Vec3::from_array(sel.scale);
+
+    let axis_len = 2.0;
+    let axes = [Vec3::X, Vec3::Y, Vec3::Z];
+    let colors = [
+        Color::srgb(1.0, 0.0, 0.0), // X = Red
+        Color::srgb(0.0, 1.0, 0.0), // Y = Green
+        Color::srgb(0.0, 0.0, 1.0), // Z = Blue
+    ];
+
+    // Draw central white pivot sphere
+    gizmos.sphere(pos, 0.1, Color::srgb(1.0, 1.0, 1.0));
+
+    for i in 0..3 {
+        let axis_dir = rot * axes[i];
+        let line_end = pos + axis_dir * axis_len;
+        let color = colors[i];
+
+        // 1. Draw the axis line
+        gizmos.line(pos, line_end, color);
+
+        // 2. Draw Translation handle (a small sphere along the line)
+        let trans_pos = pos + axis_dir * (axis_len * 0.65);
+        gizmos.sphere(trans_pos, 0.08, color);
+
+        // 3. Draw Scale handle (a small cube at the end of the line)
+        let scale_pos = line_end;
+        let right_dir = rot * axes[(i + 1) % 3];
+        let up_dir = rot * axes[(i + 2) % 3];
+        let half_size = 0.08;
+
+        let c000 = scale_pos - axis_dir * half_size - right_dir * half_size - up_dir * half_size;
+        let c100 = scale_pos + axis_dir * half_size - right_dir * half_size - up_dir * half_size;
+        let c010 = scale_pos - axis_dir * half_size + right_dir * half_size - up_dir * half_size;
+        let c110 = scale_pos + axis_dir * half_size + right_dir * half_size - up_dir * half_size;
+        let c001 = scale_pos - axis_dir * half_size - right_dir * half_size + up_dir * half_size;
+        let c101 = scale_pos + axis_dir * half_size - right_dir * half_size + up_dir * half_size;
+        let c011 = scale_pos - axis_dir * half_size + right_dir * half_size + up_dir * half_size;
+        let c111 = scale_pos + axis_dir * half_size + right_dir * half_size + up_dir * half_size;
+
+        gizmos.line(c000, c100, color);
+        gizmos.line(c010, c110, color);
+        gizmos.line(c001, c101, color);
+        gizmos.line(c011, c111, color);
+
+        gizmos.line(c000, c010, color);
+        gizmos.line(c100, c110, color);
+        gizmos.line(c001, c011, color);
+        gizmos.line(c101, c111, color);
+
+        gizmos.line(c000, c001, color);
+        gizmos.line(c100, c101, color);
+        gizmos.line(c010, c011, color);
+        gizmos.line(c110, c111, color);
+    }
+
+    // Selection wireframe box
+    let half = scale * 0.5;
+    let corners = [
+        pos + rot * Vec3::new(-half.x, 0.0, -half.z),
+        pos + rot * Vec3::new(half.x, 0.0, -half.z),
+        pos + rot * Vec3::new(half.x, 0.0, half.z),
+        pos + rot * Vec3::new(-half.x, 0.0, half.z),
+        pos + rot * Vec3::new(-half.x, half.y * 2.0, -half.z),
+        pos + rot * Vec3::new(half.x, half.y * 2.0, -half.z),
+        pos + rot * Vec3::new(half.x, half.y * 2.0, half.z),
+        pos + rot * Vec3::new(-half.x, half.y * 2.0, half.z),
+    ];
+    let sel_color = Color::srgb(1.0, 1.0, 0.0);
+    // Bottom face
+    for i in 0..4 {
+        gizmos.line(corners[i], corners[(i + 1) % 4], sel_color);
+    }
+    // Top face
+    for i in 4..8 {
+        gizmos.line(corners[i], corners[4 + (i - 4 + 1) % 4], sel_color);
+    }
+    // Verticals
+    for i in 0..4 {
+        gizmos.line(corners[i], corners[i + 4], sel_color);
     }
 }
 

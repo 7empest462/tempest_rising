@@ -102,6 +102,7 @@ pub struct AmmoDrop {
     pub wood: u32,
     pub copper: u32,
     pub iron: u32,
+    pub health_heal: f32,
 }
 
 #[derive(Component)]
@@ -209,6 +210,7 @@ pub struct PlayModePlayer {
     pub automatic_fire_timer: f32,
     pub swim_sound_entity: Option<Entity>,
     pub wade_sound_timer: f32,
+    pub health_packs: u32,
 }
 
 // Parent tag for sync
@@ -295,6 +297,359 @@ pub struct PlayModeCamera {
     pub yaw: f32,
     pub pitch: f32,
     pub view_mode: ViewMode,
+}
+
+fn spawn_modular_block_colliders(
+    commands: &mut Commands,
+    prefab_type: &str,
+    custom_mesh: Option<&crate::map_editor::data::EditableMesh>,
+    parent: Entity,
+) {
+    match prefab_type {
+        "floor_tile" => {
+            let child = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(4.0, 0.2, 4.0),
+                    Transform::from_xyz(0.0, 0.1, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            commands.entity(parent).add_child(child);
+        }
+        "ceiling_tile" => {
+            let child = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(4.0, 0.15, 4.0),
+                    Transform::from_xyz(0.0, 0.0, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            commands.entity(parent).add_child(child);
+        }
+        "wall_straight" => {
+            let child = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(4.0, 3.5, 0.2),
+                    Transform::from_xyz(0.0, 1.75, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            commands.entity(parent).add_child(child);
+        }
+        "wall_corner" => {
+            let child1 = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(4.0, 3.5, 0.2),
+                    Transform::from_xyz(0.0, 1.75, -0.1),
+                    PlayModeEntity,
+                ))
+                .id();
+            let child2 = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(0.2, 3.5, 4.0),
+                    Transform::from_xyz(-0.1, 1.75, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            commands.entity(parent).add_child(child1).add_child(child2);
+        }
+        "wall_t_junction" => {
+            let child1 = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(4.0, 3.5, 0.2),
+                    Transform::from_xyz(0.0, 1.75, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            let child2 = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(0.2, 3.5, 2.0),
+                    Transform::from_xyz(0.0, 1.75, 1.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            commands.entity(parent).add_child(child1).add_child(child2);
+        }
+        "wall_cross" => {
+            let child1 = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(4.0, 3.5, 0.2),
+                    Transform::from_xyz(0.0, 1.75, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            let child2 = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(0.2, 3.5, 4.0),
+                    Transform::from_xyz(0.0, 1.75, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            commands.entity(parent).add_child(child1).add_child(child2);
+        }
+        "door_tile" | "door_frame" => {
+            let child1 = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(1.2, 3.5, 0.2),
+                    Transform::from_xyz(-1.4, 1.75, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            let child2 = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(1.2, 3.5, 0.2),
+                    Transform::from_xyz(1.4, 1.75, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            let child3 = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(1.6, 1.1, 0.2),
+                    Transform::from_xyz(0.0, 2.95, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            let door_panel = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(1.6, 2.4, 0.1),
+                    Transform::from_xyz(0.0, 1.2, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            commands
+                .entity(parent)
+                .add_child(child1)
+                .add_child(child2)
+                .add_child(child3)
+                .add_child(door_panel);
+        }
+        "window_tile" | "window_frame" => {
+            let child1 = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(4.0, 1.0, 0.2),
+                    Transform::from_xyz(0.0, 0.5, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            let child2 = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(4.0, 1.0, 0.2),
+                    Transform::from_xyz(0.0, 3.0, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            let child3 = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(0.4, 1.5, 0.2),
+                    Transform::from_xyz(-1.8, 1.75, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            let child4 = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(0.4, 1.5, 0.2),
+                    Transform::from_xyz(1.8, 1.75, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            commands
+                .entity(parent)
+                .add_child(child1)
+                .add_child(child2)
+                .add_child(child3)
+                .add_child(child4);
+        }
+        "roof_tile" => {
+            let child = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(4.0, 0.2, 4.3),
+                    Transform::from_xyz(0.0, 1.2, 0.0)
+                        .with_rotation(Quat::from_rotation_x(35.0f32.to_radians())),
+                    PlayModeEntity,
+                ))
+                .id();
+            commands.entity(parent).add_child(child);
+        }
+        "roof_gable" => {
+            let child = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(4.0, 2.35, 0.2),
+                    Transform::from_xyz(0.0, 1.175, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            commands.entity(parent).add_child(child);
+        }
+        "hallway_segment" => {
+            let child1 = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(4.0, 0.2, 8.0),
+                    Transform::from_xyz(0.0, 0.1, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            let child2 = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(0.2, 3.5, 8.0),
+                    Transform::from_xyz(-2.0, 1.75, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            let child3 = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(0.2, 3.5, 8.0),
+                    Transform::from_xyz(2.0, 1.75, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            let child4 = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(4.0, 0.15, 8.0),
+                    Transform::from_xyz(0.0, 3.5, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            commands
+                .entity(parent)
+                .add_child(child1)
+                .add_child(child2)
+                .add_child(child3)
+                .add_child(child4);
+        }
+        "room_pillar" => {
+            let child = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(0.5, 3.5, 0.5),
+                    Transform::from_xyz(0.0, 1.75, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            commands.entity(parent).add_child(child);
+        }
+        "chest" => {
+            let child = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(0.8, 0.6, 0.5),
+                    Transform::from_xyz(0.0, 0.3, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            commands.entity(parent).add_child(child);
+        }
+        "workbench" => {
+            let child = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(1.2, 0.8, 0.9),
+                    Transform::from_xyz(0.0, 0.45, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            commands.entity(parent).add_child(child);
+        }
+        "furnace" => {
+            let child = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(0.8, 0.8, 0.9),
+                    Transform::from_xyz(0.0, 0.45, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            commands.entity(parent).add_child(child);
+        }
+        "bed" => {
+            let child = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(1.2, 0.5, 2.0),
+                    Transform::from_xyz(0.0, 0.25, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            commands.entity(parent).add_child(child);
+        }
+        "prop_chair" => {
+            let child = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(0.6, 0.9, 0.6),
+                    Transform::from_xyz(0.0, 0.45, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            commands.entity(parent).add_child(child);
+        }
+        "prop_desk" => {
+            let child = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(1.6, 0.85, 0.8),
+                    Transform::from_xyz(0.0, 0.425, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            commands.entity(parent).add_child(child);
+        }
+        "prop_health_pack" => {
+            let child = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(0.5, 0.25, 0.4),
+                    Transform::from_xyz(0.0, 0.125, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            commands.entity(parent).add_child(child);
+        }
+        "prop_crate" => {
+            let child = commands
+                .spawn((
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(1.2, 1.2, 1.2),
+                    Transform::from_xyz(0.0, 0.6, 0.0),
+                    PlayModeEntity,
+                ))
+                .id();
+            commands.entity(parent).add_child(child);
+        }
+        "custom_mesh" => {
+            if let Some(m) = custom_mesh {
+                let bevy_mesh = m.to_bevy_mesh();
+                if let Some(col) = avian3d::prelude::Collider::trimesh_from_mesh(&bevy_mesh) {
+                    commands
+                        .entity(parent)
+                        .insert((avian3d::prelude::RigidBody::Static, col));
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 // Setup system to initialize play world dynamically
@@ -572,7 +927,7 @@ fn setup_play_mode(
     let half_w = (mansion_settings.cols as f32 * mansion_settings.cell_size) / 2.0;
     let half_d = (mansion_settings.rows as f32 * mansion_settings.cell_size) / 2.0;
 
-    // 5. Spawn all Placed Prefabs (Resource Nodes)
+    // 5. Spawn all Placed Prefabs (Resource Nodes and Modular/Custom blocks)
     for (idx, p) in map.prefabs.iter().enumerate() {
         if p.prefab_type == "spawn_point" || p.prefab_type == "house" {
             continue;
@@ -589,29 +944,98 @@ fn setup_play_mode(
             }
         }
 
-        let node_parent = spawn_play_prefab(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            &p.prefab_type,
-            p_pos,
-            p.rotation_y.unwrap_or(0.0),
-        );
+        let is_mod_or_custom = matches!(
+            p.prefab_type.as_str(),
+            "floor_tile"
+                | "wall_straight"
+                | "wall_corner"
+                | "door_tile"
+                | "door_frame"
+                | "window_tile"
+                | "window_frame"
+                | "roof_tile"
+                | "roof_gable"
+                | "wall_t_junction"
+                | "wall_cross"
+                | "ceiling_tile"
+                | "hallway_segment"
+                | "room_pillar"
+                | "custom_mesh"
+                | "custom_asset"
+                | "chest"
+                | "workbench"
+                | "furnace"
+                | "bed"
+                | "torch"
+                | "fluorescent_light"
+                | "prop_chair"
+                | "prop_desk"
+                | "prop_health_pack"
+                | "prop_crate"
+        ) || p.prefab_type.starts_with("custom:");
 
-        // Spawn a resource tracker entity attached to it
-        commands.entity(node_parent).insert((
-            PlayResourceNode {
-                index: idx,
-                prefab_type: p.prefab_type.clone(),
-                position: p_pos,
-                health: if p.prefab_type.starts_with("tree") {
-                    3
-                } else {
-                    4
+        if is_mod_or_custom {
+            // Spawn modular building block / custom mesh / custom asset with full 3D rotation and scale
+            let rot = Quat::from_array(p.rotation);
+            let scale = Vec3::from_array(p.scale);
+            let parent = commands
+                .spawn((
+                    Transform::from_translation(p_pos)
+                        .with_rotation(rot)
+                        .with_scale(scale),
+                    Visibility::Visible,
+                    InheritedVisibility::default(),
+                    PlayModeEntity,
+                ))
+                .id();
+
+            // Spawn visual children using the map editor's public function
+            crate::map_editor::spawn_prefab_visuals_children(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &p.prefab_type,
+                p_pos,
+                p.texture_override.as_deref(),
+                &mansion_settings,
+                parent,
+                &asset_server,
+                p.custom_mesh.as_ref(),
+            );
+
+            // Spawn physical colliders
+            spawn_modular_block_colliders(
+                &mut commands,
+                &p.prefab_type,
+                p.custom_mesh.as_ref(),
+                parent,
+            );
+        } else {
+            // Natural resource node
+            let node_parent = spawn_play_prefab(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &p.prefab_type,
+                p_pos,
+                p.rotation_y.unwrap_or(0.0),
+            );
+
+            // Spawn a resource tracker entity attached to it
+            commands.entity(node_parent).insert((
+                PlayResourceNode {
+                    index: idx,
+                    prefab_type: p.prefab_type.clone(),
+                    position: p_pos,
+                    health: if p.prefab_type.starts_with("tree") {
+                        3
+                    } else {
+                        4
+                    },
                 },
-            },
-            PlayModeEntity,
-        ));
+                PlayModeEntity,
+            ));
+        }
     }
 
     // 6. Build customized Player model
@@ -1094,6 +1518,7 @@ fn setup_play_mode(
                 automatic_fire_timer: 0.0,
                 swim_sound_entity: None,
                 wade_sound_timer: 0.0,
+                health_packs: 0,
             },
             Transform::from_translation(spawn_pos),
             Visibility::Visible,
@@ -1517,6 +1942,27 @@ fn player_movement_and_ragdoll_system(
         }
     }
 
+    if keyboard_input.just_pressed(KeyCode::KeyH) {
+        if player.health_packs > 0 {
+            if player.health >= player.max_health {
+                inventory_log("❤️ Health is already full!");
+            } else {
+                player.health_packs -= 1;
+                player.health = (player.health + 35.0).min(player.max_health);
+                params.commands.spawn((
+                    AudioPlayer::new(params.asset_server.load("chest_open.wav")),
+                    PlaybackSettings::DESPAWN,
+                ));
+                inventory_log(&format!(
+                    "❤️ Used Health Pack! Healed +35 HP (Current HP: {}/{}) - {} left",
+                    player.health as u32, player.max_health as u32, player.health_packs
+                ));
+            }
+        } else {
+            inventory_log("❌ No Health Packs left! Find or place some on the map.");
+        }
+    }
+
     let p_state = player.state;
 
     // 2. Active Mode / Swimming Mode / Flying Mode Controls
@@ -1564,16 +2010,16 @@ fn player_movement_and_ragdoll_system(
             let (ground_y, _) = get_floor_and_ceiling(player_transform.translation, terrain_y);
             let water_depth = (water_settings.height - ground_y).max(0.0);
 
-            let mut speed = 4.0 * player.height;
+            let mut speed = 2.0 * player.height;
             if keyboard_input.pressed(KeyCode::ShiftLeft)
                 || keyboard_input.pressed(KeyCode::ShiftRight)
             {
-                speed *= 2.0; // Running speed
+                speed *= 1.7; // Running speed
             }
 
             // Wade speed reduction in shallow water
             if water_depth > 0.0 {
-                let wade_factor = (1.0 - (water_depth / 1.3) * 0.45).max(0.55);
+                let wade_factor = (1.0 - (water_depth / 1.0) * 0.45).max(0.55);
                 speed *= wade_factor;
             }
 
@@ -1619,7 +2065,7 @@ fn player_movement_and_ragdoll_system(
             }
 
             // Fluid transition: if deep water, change to Swimming state
-            let is_deep_enough_to_swim = water_depth >= 1.3;
+            let is_deep_enough_to_swim = water_depth >= 1.0;
             if player_transform.translation.y <= water_settings.height
                 && is_deep_enough_to_swim
                 && player_transform.translation.y > -20.0
@@ -1660,26 +2106,18 @@ fn player_movement_and_ragdoll_system(
             // Sync player's logical position with solved physics translation (offsetting by float_height so player.position.y is at the ground/feet, smoothed to eliminate physics spring jitter)
             let float_height = player.height * 0.5 + 0.08;
 
-            // Ground clamp player physics to prevent clipping/sinking into hills
-            let terrain_y = get_bilinear_height(player_transform.translation.x, player_transform.translation.z, &map);
-            let min_phys_y = terrain_y + float_height;
-            if player_transform.translation.y < min_phys_y {
-                player_transform.translation.y = min_phys_y;
-                if let Ok(mut phys_pos) = physics_pos_query.get_mut(_player_entity) {
-                    phys_pos.0.y = min_phys_y;
-                }
-                if let Ok(mut vel) = velocity_query.get_mut(_player_entity) {
-                    if vel.y < 0.0 {
-                        vel.y = 0.0;
-                    }
-                }
-            }
-
+            let terrain_y = get_bilinear_height(
+                player_transform.translation.x,
+                player_transform.translation.z,
+                &map,
+            );
             let target_y = player_transform.translation.y - float_height;
             player.position.x = player_transform.translation.x;
             player.position.z = player_transform.translation.z;
-            // Instant vertical response when grounded to eliminate sinking/clipping through hills
-            player.position.y = target_y;
+
+            // Visual height clamp: keep visual position from sinking below the ground/floor visually, without teleporting physics body (which causes rapid up-down shakiness)
+            let ground_y = get_effective_floor_height(player.position, terrain_y);
+            player.position.y = target_y.max(ground_y);
         } else {
             let mut move_dir = Vec3::ZERO;
 
@@ -1717,25 +2155,25 @@ fn player_movement_and_ragdoll_system(
             let water_depth = (water_settings.height - ground_y).max(0.0);
 
             let mut speed = if p_state == PlayerState::Swimming {
-                2.5 * player.height
+                1.5 * player.height
             } else if p_state == PlayerState::Flying {
-                12.0 * player.height
+                8.0 * player.height
             } else {
-                4.0 * player.height
+                2.0 * player.height
             };
             if keyboard_input.pressed(KeyCode::ShiftLeft)
                 || keyboard_input.pressed(KeyCode::ShiftRight)
             {
                 if p_state == PlayerState::Flying {
-                    speed *= 3.0;
+                    speed *= 2.5;
                 } else {
-                    speed *= 2.0;
+                    speed *= 1.7;
                 }
             }
 
             // Wade speed reduction in shallow water
             if p_state == PlayerState::Active && water_depth > 0.0 {
-                let wade_factor = (1.0 - (water_depth / 1.3) * 0.45).max(0.55);
+                let wade_factor = (1.0 - (water_depth / 1.0) * 0.45).max(0.55);
                 speed *= wade_factor;
             }
 
@@ -1793,7 +2231,7 @@ fn player_movement_and_ragdoll_system(
             player.position.z = player.position.z.clamp(-hh + 1.0, hh - 1.0);
 
             let water_level = water_settings.height;
-            let _is_deep_enough_to_swim = water_depth >= 1.3;
+            let _is_deep_enough_to_swim = water_depth >= 1.0;
 
             if p_state == PlayerState::Swimming {
                 let mut swim_y_dir = 0.0;
@@ -1824,7 +2262,7 @@ fn player_movement_and_ragdoll_system(
                 }
                 player.velocity_y = 0.0;
 
-                if water_depth < 1.2 || player.position.y < -20.0 {
+                if water_depth < 0.85 || player.position.y < -20.0 {
                     player.state = PlayerState::Active;
                     inventory_log("🚶 Walked out of water onto land.");
                 } else if player.position.y >= water_level - 0.05
@@ -2269,7 +2707,7 @@ fn player_movement_and_ragdoll_system(
         let water_level = water_settings.height;
         let ground_y = get_bilinear_height(player.position.x, player.position.z, &map);
         let water_depth = (water_level - ground_y).max(0.0);
-        let is_deep_enough_to_swim = water_depth >= 1.3;
+        let is_deep_enough_to_swim = water_depth >= 1.0;
 
         if is_deep_enough_to_swim && player.position.y <= water_level {
             player.state = PlayerState::Swimming;
@@ -4690,30 +5128,52 @@ fn gun_fire_and_bullet_system(
                 creature.state = creatures::CreatureState::Dead;
                 creature.death_timer = 0.0;
 
-                // Spawn a physical ammo and loot drop box!
+                // Spawn a physical ammo and loot drop box or a health pack!
                 let drop_pos = Vec3::new(c_pos.x, c_pos.y + 0.3, c_pos.z);
 
                 let wood_loot = 1 + (rand::random::<f32>() * 3.0) as u32; // 1 to 3
                 let copper_loot = (rand::random::<f32>() * 3.0) as u32; // 0 to 2
                 let iron_loot = (rand::random::<f32>() * 2.0) as u32; // 0 to 1
 
-                commands.spawn((
-                    WorldAssetRoot(asset_server.load("Gun_Sniper_Ammo.gltf#Scene0")),
-                    Transform::from_translation(drop_pos).with_scale(Vec3::splat(1.8)),
-                    AmmoDrop {
-                        ammo_pistol: 12,
-                        ammo_revolver: 6,
-                        ammo_rifle: 30,
-                        ammo_sniper: 5,
-                        wood: wood_loot,
-                        copper: copper_loot,
-                        iron: iron_loot,
-                    },
-                    SpinDrop,
-                    PlayModeEntity,
-                ));
-
-                inventory_log("💀 Struck creature down! Ammo Drop Spawned!");
+                if rand::random::<f32>() < 0.4 {
+                    // Spawn a Health Pack!
+                    commands.spawn((
+                        WorldAssetRoot(asset_server.load("Prop_HealthPack.gltf#Scene0")),
+                        Transform::from_translation(drop_pos).with_scale(Vec3::splat(1.5)),
+                        AmmoDrop {
+                            ammo_pistol: 0,
+                            ammo_revolver: 0,
+                            ammo_rifle: 0,
+                            ammo_sniper: 0,
+                            wood: 0,
+                            copper: 0,
+                            iron: 0,
+                            health_heal: 35.0,
+                        },
+                        SpinDrop,
+                        PlayModeEntity,
+                    ));
+                    inventory_log("💀 Struck creature down! Health Pack Drop Spawned!");
+                } else {
+                    // Spawn a standard Ammo/Loot Drop!
+                    commands.spawn((
+                        WorldAssetRoot(asset_server.load("Gun_Sniper_Ammo.gltf#Scene0")),
+                        Transform::from_translation(drop_pos).with_scale(Vec3::splat(1.8)),
+                        AmmoDrop {
+                            ammo_pistol: 12,
+                            ammo_revolver: 6,
+                            ammo_rifle: 30,
+                            ammo_sniper: 5,
+                            wood: wood_loot,
+                            copper: copper_loot,
+                            iron: iron_loot,
+                            health_heal: 0.0,
+                        },
+                        SpinDrop,
+                        PlayModeEntity,
+                    ));
+                    inventory_log("💀 Struck creature down! Ammo Drop Spawned!");
+                }
             } else {
                 inventory_log(&format!(
                     "💥 Hit creature! HP remaining: {}/{}",
@@ -4820,6 +5280,10 @@ fn update_drops_system(
             inventory.copper += drop.copper;
             inventory.iron += drop.iron;
 
+            if drop.health_heal > 0.0 {
+                player.health = (player.health + drop.health_heal).min(player.max_health);
+            }
+
             // Log pickup to HUD
             let mut items = vec![];
             if drop.ammo_pistol > 0 {
@@ -4842,6 +5306,9 @@ fn update_drops_system(
             }
             if drop.iron > 0 {
                 items.push(format!("+{} Iron", drop.iron));
+            }
+            if drop.health_heal > 0.0 {
+                items.push(format!("+{} HP", drop.health_heal as u32));
             }
 
             inventory_log(&format!("🎒 Acquired Loot Drop: {}", items.join(", ")));

@@ -182,10 +182,39 @@ pub fn generate_grass_chunks(map: &TempestMap) -> Vec<GrassChunkData> {
                         continue;
                     }
 
-                    // Skip grass inside the mansion footprint (X: [-22, 22], Z: [-12, 12])
                     let world_x = x as f32 + offset_x;
                     let world_z = z as f32 + offset_z;
+
+                    // Skip grass inside the mansion footprint (X: [-22, 22], Z: [-12, 12])
                     if world_x.abs() <= 22.0 && world_z.abs() <= 12.0 {
+                        continue;
+                    }
+
+                    // Skip grass under modular floor/hallway/ceiling tiles
+                    let mut under_floor = false;
+                    for p in &map.prefabs {
+                        if p.prefab_type == "floor_tile"
+                            || p.prefab_type == "hallway_segment"
+                            || p.prefab_type == "ceiling_tile"
+                        {
+                            let p_pos = Vec3::from_array(p.position);
+                            let rot = Quat::from_array(p.rotation);
+                            // Transform world_x/world_z to local space of the prefab
+                            let diff =
+                                Vec3::new(world_x, 0.0, world_z) - Vec3::new(p_pos.x, 0.0, p_pos.z);
+                            let local_diff = rot.inverse() * diff;
+                            let (fw, fd) = if p.prefab_type == "hallway_segment" {
+                                (2.0f32, 4.0f32) // half-width and half-depth
+                            } else {
+                                (2.0f32, 2.0f32) // floor_tile / ceiling_tile half-dimensions
+                            };
+                            if local_diff.x.abs() < fw + 0.1 && local_diff.z.abs() < fd + 0.1 {
+                                under_floor = true;
+                                break;
+                            }
+                        }
+                    }
+                    if under_floor {
                         continue;
                     }
 
