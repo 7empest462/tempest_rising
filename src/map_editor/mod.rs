@@ -111,6 +111,14 @@ impl Default for BrushSettings {
 }
 
 #[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CustomMeshPrimitive {
+    #[default]
+    Cube,
+    Sphere,
+}
+
+#[allow(dead_code)]
 #[derive(Resource)]
 pub struct SelectionState {
     pub selected_idx: Option<usize>,
@@ -125,6 +133,9 @@ pub struct SelectionState {
     pub selected_texture: String,
     pub preview_entity: Option<Entity>,
     pub preview_tool: Option<SculptTool>,
+    pub placement_rotation_angle: f32,
+    pub placement_flipped: bool,
+    pub custom_mesh_primitive: CustomMeshPrimitive,
 }
 
 impl Default for SelectionState {
@@ -142,6 +153,9 @@ impl Default for SelectionState {
             selected_texture: "Default".to_string(),
             preview_entity: None,
             preview_tool: None,
+            placement_rotation_angle: 0.0,
+            placement_flipped: false,
+            custom_mesh_primitive: CustomMeshPrimitive::Cube,
         }
     }
 }
@@ -734,57 +748,89 @@ pub fn generate_water_mesh(w: u32, h: u32) -> Mesh {
 pub fn generate_roof_gable_mesh() -> Mesh {
     let positions = vec![
         // Front Face
-        [-2.0, 0.0, 0.1], [2.0, 0.0, 0.1], [2.0, 2.35, 0.1],
+        [-2.0, 0.0, 0.1],
+        [2.0, 0.0, 0.1],
+        [2.0, 2.35, 0.1],
         // Back Face
-        [-2.0, 0.0, -0.1], [2.0, 0.0, -0.1], [2.0, 2.35, -0.1],
+        [-2.0, 0.0, -0.1],
+        [2.0, 0.0, -0.1],
+        [2.0, 2.35, -0.1],
         // Bottom Face
-        [-2.0, 0.0, -0.1], [2.0, 0.0, -0.1], [-2.0, 0.0, 0.1], [2.0, 0.0, 0.1],
+        [-2.0, 0.0, -0.1],
+        [2.0, 0.0, -0.1],
+        [-2.0, 0.0, 0.1],
+        [2.0, 0.0, 0.1],
         // Left Slanted Face
-        [-2.0, 0.0, -0.1], [-2.0, 0.0, 0.1], [2.0, 2.35, -0.1], [2.0, 2.35, 0.1],
+        [-2.0, 0.0, -0.1],
+        [-2.0, 0.0, 0.1],
+        [2.0, 2.35, -0.1],
+        [2.0, 2.35, 0.1],
         // Right Vertical Face
-        [2.0, 0.0, -0.1], [2.0, 0.0, 0.1], [2.0, 2.35, -0.1], [2.0, 2.35, 0.1],
+        [2.0, 0.0, -0.1],
+        [2.0, 0.0, 0.1],
+        [2.0, 2.35, -0.1],
+        [2.0, 2.35, 0.1],
     ];
 
     let normals = vec![
         // Front Face
-        [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, 1.0],
         // Back Face
-        [0.0, 0.0, -1.0], [0.0, 0.0, -1.0], [0.0, 0.0, -1.0],
+        [0.0, 0.0, -1.0],
+        [0.0, 0.0, -1.0],
+        [0.0, 0.0, -1.0],
         // Bottom Face
-        [0.0, -1.0, 0.0], [0.0, -1.0, 0.0], [0.0, -1.0, 0.0], [0.0, -1.0, 0.0],
+        [0.0, -1.0, 0.0],
+        [0.0, -1.0, 0.0],
+        [0.0, -1.0, 0.0],
+        [0.0, -1.0, 0.0],
         // Left Slanted Face
-        [-0.5, 0.86, 0.0], [-0.5, 0.86, 0.0], [-0.5, 0.86, 0.0], [-0.5, 0.86, 0.0],
+        [-0.5, 0.86, 0.0],
+        [-0.5, 0.86, 0.0],
+        [-0.5, 0.86, 0.0],
+        [-0.5, 0.86, 0.0],
         // Right Vertical Face
-        [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
     ];
 
     let uvs = vec![
         // Front Face
-        [0.0, 0.0], [1.0, 0.0], [1.0, 1.0],
+        [0.0, 0.0],
+        [1.0, 0.0],
+        [1.0, 1.0],
         // Back Face
-        [1.0, 0.0], [0.0, 0.0], [1.0, 1.0],
+        [1.0, 0.0],
+        [0.0, 0.0],
+        [1.0, 1.0],
         // Bottom Face
-        [0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0],
+        [0.0, 0.0],
+        [1.0, 0.0],
+        [0.0, 1.0],
+        [1.0, 1.0],
         // Left Slanted Face
-        [0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0],
+        [0.0, 0.0],
+        [1.0, 0.0],
+        [0.0, 1.0],
+        [1.0, 1.0],
         // Right Vertical Face
-        [0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0],
+        [0.0, 0.0],
+        [1.0, 0.0],
+        [0.0, 1.0],
+        [1.0, 1.0],
     ];
 
     let indices = vec![
         // Front Face
-        0, 1, 2,
-        // Back Face
-        5, 4, 3,
-        // Bottom Face
-        6, 8, 9,
-        6, 9, 7,
-        // Left Slanted Face
-        10, 11, 13,
-        10, 13, 12,
-        // Right Vertical Face
-        14, 17, 15,
-        14, 16, 17,
+        0, 1, 2, // Back Face
+        5, 4, 3, // Bottom Face
+        6, 8, 9, 6, 9, 7, // Left Slanted Face
+        10, 11, 13, 10, 13, 12, // Right Vertical Face
+        14, 17, 15, 14, 16, 17,
     ];
 
     let mut mesh = Mesh::new(
@@ -2006,181 +2052,80 @@ fn map_editor_ui(
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
-    egui::Window::new("Map Editor Controls").show(ctx, |ui| {
-        ui.horizontal(|ui| {
-            if ui
-                .add(
-                    egui::Button::new("🚪 Exit to Main Menu")
-                        .fill(egui::Color32::from_rgb(180, 50, 50))
-                        .min_size(egui::vec2(120.0, 24.0)),
-                )
-                .clicked()
-            {
-                next_state.set(AppState::MainMenu);
-            }
-            if ui
-                .add(
-                    egui::Button::new("🎮 Play Map")
-                        .fill(egui::Color32::from_rgb(50, 150, 50))
-                        .min_size(egui::vec2(100.0, 24.0)),
-                )
-                .clicked()
-            {
-                next_state.set(AppState::PlayMode);
-            }
-        });
-        ui.separator();
+    // Apply a premium, modern dark theme template
+    let mut visuals = egui::Visuals::dark();
+    visuals.window_corner_radius = egui::CornerRadius::same(10);
+    visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(6);
+    visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(6);
+    visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(6);
+    visuals.widgets.active.corner_radius = egui::CornerRadius::same(6);
 
-        ui.heading("Sculpting Tools");
-        ui.separator();
+    // Sleek background & panel colors
+    visuals.window_fill = egui::Color32::from_rgba_unmultiplied(20, 20, 25, 235); // semi-transparent charcoal
+    visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(28, 28, 33);
+    visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(38, 38, 45);
+    visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(55, 55, 66);
+    visuals.widgets.active.bg_fill = egui::Color32::from_rgb(70, 70, 85);
 
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut brush.tool, SculptTool::Raise, "Raise");
-            ui.selectable_value(&mut brush.tool, SculptTool::Lower, "Lower");
-            ui.selectable_value(&mut brush.tool, SculptTool::Smooth, "Smooth");
-            ui.selectable_value(&mut brush.tool, SculptTool::Disturb, "Disturb");
-            ui.selectable_value(&mut brush.tool, SculptTool::Rocky, "Rocky ⛰");
-        });
+    // Curated Indigo selection accent
+    visuals.selection.bg_fill = egui::Color32::from_rgb(99, 102, 241);
 
-        ui.label("Prefab Brushes:");
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceTreeOak, "Oak");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceTreePine, "Pine");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceTreeBirch, "Birch");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceShrub, "Shrub 🌿");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceCactus, "Cactus 🌵");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceRock, "Rock");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceSpawnPoint, "Spawn");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceHouse, "House 🏠");
-            ui.selectable_value(&mut brush.tool, SculptTool::DeletePrefab, "Delete");
-        });
+    ctx.set_visuals(visuals);
 
-        if brush.tool == SculptTool::PlaceHouse {
-            ui.separator();
-            ui.heading("Mansion Settings");
-            ui.add(egui::Slider::new(&mut mansion_settings.cols, 4..=12).text("Columns"));
-            ui.add(egui::Slider::new(&mut mansion_settings.rows, 2..=6).text("Rows"));
-            ui.add(
-                egui::Slider::new(&mut mansion_settings.cell_size, 4.0..=8.0).text("Cell Size (m)"),
-            );
+    egui::Window::new("Map Editor Controls")
+        .default_width(340.0)
+        .default_height(600.0)
+        .show(ctx, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                // 1. Top actions (Exit & Play)
+                ui.horizontal(|ui| {
+                    if ui
+                        .add(
+                            egui::Button::new("🚪 Exit to Main Menu")
+                                .fill(egui::Color32::from_rgb(180, 50, 50))
+                                .min_size(egui::vec2(120.0, 24.0)),
+                        )
+                        .clicked()
+                    {
+                        next_state.set(AppState::MainMenu);
+                    }
+                    if ui
+                        .add(
+                            egui::Button::new("🎮 Play Map")
+                                .fill(egui::Color32::from_rgb(50, 150, 50))
+                                .min_size(egui::vec2(100.0, 24.0)),
+                        )
+                        .clicked()
+                    {
+                        next_state.set(AppState::PlayMode);
+                    }
+                });
+                ui.separator();
 
-            let w = mansion_settings.cols as f32 * mansion_settings.cell_size;
-            let d = mansion_settings.rows as f32 * mansion_settings.cell_size;
-            ui.label(format!(
-                "Mansion Footprint: {:.1}m x {:.1}m ({} Bedrooms)",
-                w,
-                d,
-                (mansion_settings.cols * (mansion_settings.rows - 2) * 2) + 12
-            ));
-        }
+                // 2. Snapping controls (Always visible at top)
+                ui.label("Snapping:");
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut selection_state.snap_to_grid, "📎 Grid Snap");
+                    ui.checkbox(&mut selection_state.snap_to_objects, "🧲 Object Snap");
+                });
+                if selection_state.snap_to_grid {
+                    ui.add(
+                        egui::Slider::new(&mut selection_state.snap_grid_size, 0.25..=4.0)
+                            .text("Grid Size"),
+                    );
+                }
+                ui.checkbox(
+                    &mut selection_state.placement_flipped,
+                    "Flip/Mirror placing prefab (Key: F)",
+                );
+                ui.separator();
 
-        ui.label("Crafting Ore Brushes:");
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceOreCopper, "Copper 🔸");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceOreIron, "Iron 🟫");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceOreGold, "Gold 🟡");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceOreSilver, "Silver ◽");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceOrePlatinum, "Platinum 💎");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceOreSteel, "Steel 🔗");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceOreGranite, "Granite ◼");
-            ui.selectable_value(
-                &mut brush.tool,
-                SculptTool::PlaceProceduralWall,
-                "Procedural Wall 🧱",
-            );
-        });
-
-        ui.separator();
-        ui.heading("🏗️ Object & Building Mode");
-        ui.label("Modular Building Blocks:");
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceModularFloor, "Floor 🟫");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceModularWall, "Wall 🧱");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceModularCorner, "Corner 📐");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceModularRoof, "Roof 🏠");
-        });
-        ui.horizontal(|ui| {
-            ui.selectable_value(
-                &mut brush.tool,
-                SculptTool::PlaceModularDoorFrame,
-                "Door 🚪",
-            );
-            ui.selectable_value(
-                &mut brush.tool,
-                SculptTool::PlaceModularWindowFrame,
-                "Window 🪟",
-            );
-        });
-        ui.horizontal(|ui| {
-            ui.selectable_value(
-                &mut brush.tool,
-                SculptTool::PlaceWallTJunction,
-                "T-Junction",
-            );
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceWallCross, "Cross ✚");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceCeilingTile, "Ceiling ⬜");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceModularRoofGable, "Roof Gable 📐");
-        });
-        ui.horizontal(|ui| {
-            ui.selectable_value(
-                &mut brush.tool,
-                SculptTool::PlaceFluorescentLight,
-                "Light 💡",
-            );
-            ui.selectable_value(
-                &mut brush.tool,
-                SculptTool::PlaceHallwaySegment,
-                "Hallway ▬",
-            );
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceRoomPillar, "Pillar ▮");
-        });
-        ui.label("Functional Structures:");
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceChest, "Chest 🧰");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceWorkbench, "Workbench 🔨");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceFurnace, "Furnace 🔥");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceBed, "Bed 🛏️");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceTorch, "Torch 🔦");
-        });
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceChair, "Chair 🪑");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceDesk, "Desk 🗄️");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceHealthPack, "Health 🏥");
-            ui.selectable_value(&mut brush.tool, SculptTool::PlaceCrate, "Crate 📦");
-        });
-        ui.horizontal(|ui| {
-            ui.selectable_value(
-                &mut brush.tool,
-                SculptTool::SelectObject,
-                "✋ Select Object",
-            );
-            ui.selectable_value(
-                &mut brush.tool,
-                SculptTool::PlaceCustomMesh,
-                "🔷 Custom Mesh",
-            );
-            ui.selectable_value(
-                &mut brush.tool,
-                SculptTool::DeletePrefab,
-                "🗑️ Delete Object",
-            );
-        });
-
-        // Snapping controls
-        ui.separator();
-        ui.label("Snapping:");
-        ui.horizontal(|ui| {
-            ui.checkbox(&mut selection_state.snap_to_grid, "📎 Grid Snap");
-            ui.checkbox(&mut selection_state.snap_to_objects, "🧲 Object Snap");
-        });
-        if selection_state.snap_to_grid {
-            ui.add(
-                egui::Slider::new(&mut selection_state.snap_grid_size, 0.25..=4.0)
-                    .text("Grid Size"),
-            );
-        }
-
-        // Selected object properties panel
+                // 3. Selected Object Properties (Always visible if selection exists, in collapsible header)
+                if let Some(sel_idx) = selection_state.selected_idx {
+                    if sel_idx < map.prefabs.len() {
+                        egui::CollapsingHeader::new("📋 Selected Object Properties")
+                            .default_open(true)
+                            .show(ui, |ui| {
         if let Some(sel_idx) = selection_state.selected_idx {
             if sel_idx < map.prefabs.len() {
                 ui.separator();
@@ -2731,619 +2676,1032 @@ fn map_editor_ui(
         }
 
         ui.separator();
-        ui.heading("\u{1f4c1} Custom Asset Import");
-        ui.horizontal(|ui| {
-            ui.label("Asset path:");
-            ui.text_edit_singleline(&mut custom_assets.import_path);
-        });
-        ui.label("Place .glb/.gltf/.obj files in the assets/ folder.");
-        ui.label("Enter the filename (e.g. my_building.glb)");
-        if ui.button("\u{2795} Import Asset").clicked() {
-            let path = custom_assets.import_path.trim().to_string();
-            if !path.is_empty() {
-                let asset_type = if path.ends_with(".glb") || path.ends_with(".gltf") {
-                    CustomAssetType::Gltf
-                } else if path.ends_with(".obj") {
-                    CustomAssetType::Obj
-                } else if path.ends_with(".png")
-                    || path.ends_with(".jpg")
-                    || path.ends_with(".jpeg")
-                {
-                    CustomAssetType::Image
-                } else {
-                    CustomAssetType::Gltf
-                };
-                let name = path
-                    .split('/')
-                    .next_back()
-                    .unwrap_or(&path)
-                    .split('.')
-                    .next()
-                    .unwrap_or(&path)
-                    .to_string();
-                custom_assets.assets.push(CustomAssetEntry {
-                    name: name.clone(),
-                    file_path: path.clone(),
-                    asset_type,
-                });
-                custom_assets.import_path.clear();
-            }
-        }
-
-        if !custom_assets.assets.is_empty() {
-            ui.label("Imported Assets:");
-            let mut to_select = custom_assets.selected_asset_idx;
-            for (i, entry) in custom_assets.assets.iter().enumerate() {
-                let label = format!(
-                    "{} ({})",
-                    entry.name,
-                    match entry.asset_type {
-                        CustomAssetType::Gltf => "GLTF",
-                        CustomAssetType::Obj => "OBJ",
-                        CustomAssetType::Image => "Texture",
+                            });
+                        ui.separator();
                     }
-                );
-                let selected = to_select == Some(i);
-                if ui.selectable_label(selected, &label).clicked() {
-                    to_select = Some(i);
-                    brush.tool = SculptTool::PlaceCustomAsset;
                 }
-            }
-            custom_assets.selected_asset_idx = to_select;
-        }
 
-        ui.separator();
-        ui.add(egui::Slider::new(&mut brush.size, 1.0..=20.0).text("Brush Size"));
-        ui.add(egui::Slider::new(&mut brush.strength, 0.5..=25.0).text("Brush Strength"));
+                // 4. Terrain & Biome Sculpting Collapsible
+                egui::CollapsingHeader::new("🌋 Terrain Sculpting & Biomes")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        ui.heading("Sculpting Tools");
+                        ui.separator();
 
-        ui.separator();
-        ui.heading("Splatmap & Biome Settings");
+                        ui.horizontal(|ui| {
+                            ui.selectable_value(&mut brush.tool, SculptTool::Raise, "Raise");
+                            ui.selectable_value(&mut brush.tool, SculptTool::Lower, "Lower");
+                            ui.selectable_value(&mut brush.tool, SculptTool::Smooth, "Smooth");
+                            ui.selectable_value(&mut brush.tool, SculptTool::Disturb, "Disturb");
+                            ui.selectable_value(&mut brush.tool, SculptTool::Rocky, "Rocky ⛰");
+                        });
 
-        let mut splat_changed = false;
+                        ui.label("Prefab Brushes:");
+                        ui.horizontal(|ui| {
+                            ui.selectable_value(&mut brush.tool, SculptTool::PlaceTreeOak, "Oak");
+                            ui.selectable_value(&mut brush.tool, SculptTool::PlaceTreePine, "Pine");
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceTreeBirch,
+                                "Birch",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceShrub,
+                                "Shrub 🌿",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceCactus,
+                                "Cactus 🌵",
+                            );
+                            ui.selectable_value(&mut brush.tool, SculptTool::PlaceRock, "Rock");
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceSpawnPoint,
+                                "Spawn",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceHouse,
+                                "House 🏠",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::DeletePrefab,
+                                "Delete",
+                            );
+                        });
 
-        ui.horizontal(|ui| {
-            ui.label("Active Biome:");
-            egui::ComboBox::from_label("")
-                .selected_text(format!("{:?}", splat_settings.biome))
-                .show_ui(ui, |ui| {
-                    if ui
-                        .selectable_value(&mut splat_settings.biome, Biome::Temperate, "Temperate")
-                        .clicked()
-                    {
-                        splat_changed = true;
-                    }
-                    if ui
-                        .selectable_value(&mut splat_settings.biome, Biome::Arid, "Arid")
-                        .clicked()
-                    {
-                        splat_changed = true;
-                    }
-                    if ui
-                        .selectable_value(&mut splat_settings.biome, Biome::Tundra, "Tundra")
-                        .clicked()
-                    {
-                        splat_changed = true;
-                    }
-                    if ui
-                        .selectable_value(&mut splat_settings.biome, Biome::Arctic, "Arctic")
-                        .clicked()
-                    {
-                        splat_changed = true;
-                    }
-                });
-        });
+                        if brush.tool == SculptTool::PlaceHouse {
+                            ui.separator();
+                            ui.heading("Mansion Settings");
+                            ui.add(
+                                egui::Slider::new(&mut mansion_settings.cols, 4..=12)
+                                    .text("Columns"),
+                            );
+                            ui.add(
+                                egui::Slider::new(&mut mansion_settings.rows, 2..=6).text("Rows"),
+                            );
+                            ui.add(
+                                egui::Slider::new(&mut mansion_settings.cell_size, 4.0..=8.0)
+                                    .text("Cell Size (m)"),
+                            );
 
-        if ui
-            .add(egui::Slider::new(&mut splat_settings.sand_height, 0.0..=5.0).text("Beach Level"))
-            .changed()
-        {
-            splat_changed = true;
-        }
-        if ui
-            .add(egui::Slider::new(&mut splat_settings.snow_height, 2.0..=20.0).text("Snow Level"))
-            .changed()
-        {
-            splat_changed = true;
-        }
-        if ui
-            .add(
-                egui::Slider::new(&mut splat_settings.cliff_steepness, 0.3..=0.95)
-                    .text("Cliff Limit"),
-            )
-            .changed()
-        {
-            splat_changed = true;
-        }
+                            let w = mansion_settings.cols as f32 * mansion_settings.cell_size;
+                            let d = mansion_settings.rows as f32 * mansion_settings.cell_size;
+                            ui.label(format!(
+                                "Mansion Footprint: {:.1}m x {:.1}m ({} Bedrooms)",
+                                w,
+                                d,
+                                (mansion_settings.cols * (mansion_settings.rows - 2) * 2) + 12
+                            ));
+                        }
 
-        if splat_changed {
-            for (entity, _) in terrain_query.iter() {
-                rebuild_terrain_mesh(entity, &mut commands, &map, &splat_settings, &mut meshes);
-            }
-        }
+                        ui.label("Crafting Ore Brushes:");
+                        ui.horizontal(|ui| {
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceOreCopper,
+                                "Copper 🔸",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceOreIron,
+                                "Iron 🟫",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceOreGold,
+                                "Gold 🟡",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceOreSilver,
+                                "Silver ◽",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceOrePlatinum,
+                                "Platinum 💎",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceOreSteel,
+                                "Steel 🔗",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceOreGranite,
+                                "Granite ◼",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceProceduralWall,
+                                "Procedural Wall 🧱",
+                            );
+                        });
 
-        ui.separator();
-        ui.heading("Water Plane Settings");
-        ui.add(egui::Slider::new(&mut water_settings.height, -5.0..=15.0).text("Water Level"));
+                        ui.separator();
 
-        ui.separator();
-        ui.heading("Procedural Generator");
-        ui.add(egui::Slider::new(&mut noise_settings.seed, 0..=9999).text("Seed"));
-        ui.add(egui::Slider::new(&mut noise_settings.frequency, 0.005..=0.15).text("Scale / Freq"));
-        ui.add(egui::Slider::new(&mut noise_settings.octaves, 1..=8).text("Octaves"));
-        ui.add(
-            egui::Slider::new(&mut noise_settings.amplitude, 1.0..=25.0).text("Max Height / Amp"),
-        );
-        ui.add(
-            egui::Slider::new(&mut noise_settings.ridge_exponent, 0.5..=4.0).text("Ridge Exponent"),
-        );
-        ui.add(
-            egui::Slider::new(&mut noise_settings.height_offset, -5.0..=15.0)
-                .text("Sea/Height Offset"),
-        );
+                        ui.separator();
+                        ui.add(egui::Slider::new(&mut brush.size, 1.0..=20.0).text("Brush Size"));
+                        ui.add(
+                            egui::Slider::new(&mut brush.strength, 0.5..=25.0)
+                                .text("Brush Strength"),
+                        );
 
-        ui.add_space(5.0);
-        ui.label("Biomes to Include in Generation:");
-        ui.horizontal(|ui| {
-            ui.checkbox(&mut biome_selection.temperate, "Temperate");
-            ui.checkbox(&mut biome_selection.arid, "Arid");
-            ui.checkbox(&mut biome_selection.tundra, "Tundra");
-            ui.checkbox(&mut biome_selection.arctic, "Arctic");
-        });
+                        ui.separator();
 
-        ui.add_space(3.0);
-        ui.checkbox(
-            &mut biome_selection.make_island,
-            "🏝️ Generate as Island (Ocean Borders)",
-        );
-        ui.add_space(5.0);
+                        ui.separator();
+                        ui.heading("Splatmap & Biome Settings");
 
-        if ui.button("Generate Procedural Terrain").clicked() {
-            // 1. Despawn existing visual prefabs and their children, then clear map.prefabs
-            for (entity, _) in prefab_query.iter() {
-                commands.entity(entity).despawn();
-            }
-            map.prefabs.clear();
+                        let mut splat_changed = false;
 
-            // 2. Generate new heightmap using fractal Perlin noise
-            let perlin = PerlinNoise::new(noise_settings.seed);
-            let w = map.width;
-            let h = map.height;
-
-            let mut active_biomes = Vec::new();
-            if biome_selection.arctic {
-                active_biomes.push(Biome::Arctic);
-            }
-            if biome_selection.tundra {
-                active_biomes.push(Biome::Tundra);
-            }
-            if biome_selection.temperate {
-                active_biomes.push(Biome::Temperate);
-            }
-            if biome_selection.arid {
-                active_biomes.push(Biome::Arid);
-            }
-            if active_biomes.is_empty() {
-                active_biomes.push(Biome::Temperate); // fallback
-            }
-
-            for z in 0..h {
-                for x in 0..w {
-                    let nx = x as f32 * noise_settings.frequency;
-                    let nz = z as f32 * noise_settings.frequency;
-
-                    // fBm fractal Perlin noise in [-1.0, 1.0]
-                    let noise_val = perlin.fbm(nx, nz, noise_settings.octaves, 2.0, 0.5);
-
-                    // Scale & map to height
-                    let normalized = (noise_val + 1.0) * 0.5;
-                    let mut final_height = (normalized.powf(noise_settings.ridge_exponent)
-                        * noise_settings.amplitude)
-                        - noise_settings.height_offset;
-
-                    if biome_selection.make_island {
-                        let dx = (x as f32 - (w as f32 / 2.0)) / (w as f32 / 2.0);
-                        let dz = (z as f32 - (h as f32 / 2.0)) / (h as f32 / 2.0);
-                        let d = (dx * dx + dz * dz).sqrt();
-                        let mask = (1.0 - d.powf(2.2)).clamp(0.0, 1.0);
-                        let ocean_depth = -6.0;
-                        final_height = final_height * mask + ocean_depth * (1.0 - mask);
-                    }
-
-                    map.set_height(x, z, final_height);
-
-                    // Determine vertex biome procedurally based on active checklist selection
-                    // Form organic north-to-south bands: Arctic (North) -> Tundra -> Temperate -> Arid/Desert (South)
-                    let z_frac = z as f32 / h as f32;
-                    let wobble = perlin.fbm(x as f32 * 0.012, z as f32 * 0.012, 2, 2.0, 0.5) * 0.07;
-                    let val = (z_frac + wobble).clamp(0.0, 0.999);
-                    let biome_idx = (val * active_biomes.len() as f32).floor() as usize;
-                    let vertex_biome = active_biomes[biome_idx];
-                    map.set_biome(x, z, vertex_biome);
-                }
-            }
-
-            // 2b. Clean up & initialize house and spawn point prefabs
-            let house_pos = Vec3::new(0.0, 1.5, 0.0);
-            let spawn_pos = Vec3::new(0.0, 2.0, 5.0);
-
-            map.prefabs.push(PlacedPrefab {
-                prefab_type: "house".to_string(),
-                position: house_pos.to_array(),
-                rotation: [0.0, 0.0, 0.0, 1.0],
-                scale: [1.0, 1.0, 1.0],
-                texture_override: None,
-                rotation_y: Some(0.0),
-                custom_mesh: None,
-            });
-            map.prefabs.push(PlacedPrefab {
-                prefab_type: "spawn_point".to_string(),
-                position: spawn_pos.to_array(),
-                rotation: [0.0, 0.0, 0.0, 1.0],
-                scale: [1.0, 1.0, 1.0],
-                texture_override: None,
-                rotation_y: Some(0.0),
-                custom_mesh: None,
-            });
-
-            // Flatten the terrain under the house footprint to height 1.5
-            let half_w = (mansion_settings.cols as f32 * mansion_settings.cell_size) / 2.0;
-            let half_d = (mansion_settings.rows as f32 * mansion_settings.cell_size) / 2.0;
-            let half_map_w = w as f32 / 2.0;
-            let half_map_h = h as f32 / 2.0;
-
-            let min_x_idx = ((house_pos.x - half_w - 2.0) + half_map_w).max(0.0) as u32;
-            let max_x_idx = ((house_pos.x + half_w + 2.0) + half_map_w).min(w as f32) as u32;
-            let min_z_idx = ((house_pos.z - half_d - 2.0) + half_map_h).max(0.0) as u32;
-            let max_z_idx = ((house_pos.z + half_d + 2.0) + half_map_h).min(h as f32) as u32;
-
-            for mz in min_z_idx..max_z_idx {
-                for mx in min_x_idx..max_x_idx {
-                    map.set_height(mx, mz, 1.5);
-                    map.set_biome(mx, mz, Biome::Temperate);
-                }
-            }
-
-            // Spawn visual entities for house and spawn point in the editor
-            spawn_prefab_visuals(
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                "house",
-                house_pos,
-                Quat::IDENTITY,
-                Vec3::ONE,
-                None,
-                &mansion_settings,
-                0,
-                &asset_server,
-                None,
-            );
-            spawn_prefab_visuals(
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                "spawn_point",
-                spawn_pos,
-                Quat::IDENTITY,
-                Vec3::ONE,
-                None,
-                &mansion_settings,
-                1,
-                &asset_server,
-                None,
-            );
-
-            // Generate roads and smooth the terrain underneath them
-            generate_roads_on_map(&mut map);
-
-            // 3. Dynamic splatmap topology analyzer & spawner matching the active biome
-            let density_factor = 0.04; // 4% chance to spawn trees/rocks in flat, fertile regions
-            let offset_x = -(w as f32) / 2.0;
-            let offset_z = -(h as f32) / 2.0;
-            for z in 2..(h - 2) {
-                for x in 2..(w - 2) {
-                    let y = map.get_height(x, z);
-
-                    // Skip placing obstacles (trees, rocks, ores) directly on top of roads!
-                    if map.get_road(x, z) > 0 {
-                        continue;
-                    }
-
-                    // Below beach or above snow level = no trees
-                    if y <= splat_settings.sand_height || y >= splat_settings.snow_height {
-                        continue;
-                    }
-
-                    // Compute slope normal at this vertex
-                    let y_l = map.get_height(x - 1, z);
-                    let y_r = map.get_height(x + 1, z);
-                    let y_u = map.get_height(x, z - 1);
-                    let y_d = map.get_height(x, z + 1);
-                    let normal = Vec3::new(y_l - y_r, 2.0, y_u - y_d).normalize();
-
-                    // If the slope is flat (meaning normal.y is above steepness threshold) - perfect grass area!
-                    if normal.y >= splat_settings.cliff_steepness {
-                        // Generate deterministic pseudo-random scatter hash
-                        let hash = (((x * 123 + z * 4567) as f32).sin() * 43_758.547)
-                            .fract()
-                            .abs();
-                        if hash < density_factor {
-                            // Assign prefab species based on the actual cell biome
-                            let cell_biome = map.get_biome(x, z);
-                            let prefab_type = match cell_biome {
-                                Biome::Temperate => {
-                                    if hash < density_factor * 0.4 {
-                                        "tree_oak"
-                                    } else if hash < density_factor * 0.75 {
-                                        "tree_birch"
-                                    } else if hash < density_factor * 0.93 {
-                                        "shrub"
-                                    } else {
-                                        "rock"
+                        ui.horizontal(|ui| {
+                            ui.label("Active Biome:");
+                            egui::ComboBox::from_label("")
+                                .selected_text(format!("{:?}", splat_settings.biome))
+                                .show_ui(ui, |ui| {
+                                    if ui
+                                        .selectable_value(
+                                            &mut splat_settings.biome,
+                                            Biome::Temperate,
+                                            "Temperate",
+                                        )
+                                        .clicked()
+                                    {
+                                        splat_changed = true;
                                     }
-                                }
-                                Biome::Arid => {
-                                    if hash < density_factor * 0.5 {
-                                        "cactus"
-                                    } else {
-                                        "rock"
+                                    if ui
+                                        .selectable_value(
+                                            &mut splat_settings.biome,
+                                            Biome::Arid,
+                                            "Arid",
+                                        )
+                                        .clicked()
+                                    {
+                                        splat_changed = true;
                                     }
-                                }
-                                Biome::Tundra => {
-                                    if hash < density_factor * 0.7 {
-                                        "tree_pine"
-                                    } else {
-                                        "rock"
+                                    if ui
+                                        .selectable_value(
+                                            &mut splat_settings.biome,
+                                            Biome::Tundra,
+                                            "Tundra",
+                                        )
+                                        .clicked()
+                                    {
+                                        splat_changed = true;
                                     }
-                                }
-                                Biome::Arctic => {
-                                    if hash < density_factor * 0.4 {
-                                        "tree_pine"
-                                    } else {
-                                        "rock"
+                                    if ui
+                                        .selectable_value(
+                                            &mut splat_settings.biome,
+                                            Biome::Arctic,
+                                            "Arctic",
+                                        )
+                                        .clicked()
+                                    {
+                                        splat_changed = true;
                                     }
+                                });
+                        });
+
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut splat_settings.sand_height, 0.0..=5.0)
+                                    .text("Beach Level"),
+                            )
+                            .changed()
+                        {
+                            splat_changed = true;
+                        }
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut splat_settings.snow_height, 2.0..=20.0)
+                                    .text("Snow Level"),
+                            )
+                            .changed()
+                        {
+                            splat_changed = true;
+                        }
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut splat_settings.cliff_steepness, 0.3..=0.95)
+                                    .text("Cliff Limit"),
+                            )
+                            .changed()
+                        {
+                            splat_changed = true;
+                        }
+
+                        if splat_changed {
+                            for (entity, _) in terrain_query.iter() {
+                                rebuild_terrain_mesh(
+                                    entity,
+                                    &mut commands,
+                                    &map,
+                                    &splat_settings,
+                                    &mut meshes,
+                                );
+                            }
+                        }
+
+                        ui.separator();
+                    });
+                ui.separator();
+
+                // 5. Prefab & Modular Placement Collapsible
+                egui::CollapsingHeader::new("🏗️ Prefab & Building Blocks")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        ui.heading("🏗️ Object & Building Mode");
+                        ui.label("Modular Building Blocks:");
+                        ui.horizontal(|ui| {
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceModularFloor,
+                                "Floor 🟫",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceModularWall,
+                                "Wall 🧱",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceModularCorner,
+                                "Corner 📐",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceModularRoof,
+                                "Roof 🏠",
+                            );
+                        });
+                        ui.horizontal(|ui| {
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceModularDoorFrame,
+                                "Door 🚪",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceModularWindowFrame,
+                                "Window 🪟",
+                            );
+                        });
+                        ui.horizontal(|ui| {
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceWallTJunction,
+                                "T-Junction",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceWallCross,
+                                "Cross ✚",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceCeilingTile,
+                                "Ceiling ⬜",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceModularRoofGable,
+                                "Roof Gable 📐",
+                            );
+                        });
+                        ui.horizontal(|ui| {
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceFluorescentLight,
+                                "Light 💡",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceHallwaySegment,
+                                "Hallway ▬",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceRoomPillar,
+                                "Pillar ▮",
+                            );
+                        });
+                        ui.label("Functional Structures:");
+                        ui.horizontal(|ui| {
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceChest,
+                                "Chest 🧰",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceWorkbench,
+                                "Workbench 🔨",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceFurnace,
+                                "Furnace 🔥",
+                            );
+                            ui.selectable_value(&mut brush.tool, SculptTool::PlaceBed, "Bed 🛏️");
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceTorch,
+                                "Torch 🔦",
+                            );
+                        });
+                        ui.horizontal(|ui| {
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceChair,
+                                "Chair 🪑",
+                            );
+                            ui.selectable_value(&mut brush.tool, SculptTool::PlaceDesk, "Desk 🗄️");
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceHealthPack,
+                                "Health 🏥",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceCrate,
+                                "Crate 📦",
+                            );
+                        });
+                        ui.horizontal(|ui| {
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::SelectObject,
+                                "✋ Select Object",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceCustomMesh,
+                                "🔷 Custom Mesh",
+                            );
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::DeletePrefab,
+                                "🗑️ Delete Object",
+                            );
+                        });
+
+                        if brush.tool == SculptTool::PlaceCustomMesh {
+                            ui.horizontal(|ui| {
+                                ui.label("Shape Primitive:");
+                                ui.selectable_value(
+                                    &mut selection_state.custom_mesh_primitive,
+                                    CustomMeshPrimitive::Cube,
+                                    "Cube 🟥",
+                                );
+                                ui.selectable_value(
+                                    &mut selection_state.custom_mesh_primitive,
+                                    CustomMeshPrimitive::Sphere,
+                                    "Sphere 🔮",
+                                );
+                            });
+                        }
+
+                        // Snapping controls
+                        ui.separator();
+
+                        ui.separator();
+                        ui.heading("\u{1f4c1} Custom Asset Import");
+                        ui.horizontal(|ui| {
+                            ui.label("Asset path:");
+                            ui.text_edit_singleline(&mut custom_assets.import_path);
+                        });
+                        ui.label("Place .glb/.gltf/.obj files in the assets/ folder.");
+                        ui.label("Enter the filename (e.g. my_building.glb)");
+                        if ui.button("\u{2795} Import Asset").clicked() {
+                            let path = custom_assets.import_path.trim().to_string();
+                            if !path.is_empty() {
+                                let asset_type =
+                                    if path.ends_with(".glb") || path.ends_with(".gltf") {
+                                        CustomAssetType::Gltf
+                                    } else if path.ends_with(".obj") {
+                                        CustomAssetType::Obj
+                                    } else if path.ends_with(".png")
+                                        || path.ends_with(".jpg")
+                                        || path.ends_with(".jpeg")
+                                    {
+                                        CustomAssetType::Image
+                                    } else {
+                                        CustomAssetType::Gltf
+                                    };
+                                let name = path
+                                    .split('/')
+                                    .next_back()
+                                    .unwrap_or(&path)
+                                    .split('.')
+                                    .next()
+                                    .unwrap_or(&path)
+                                    .to_string();
+                                custom_assets.assets.push(CustomAssetEntry {
+                                    name: name.clone(),
+                                    file_path: path.clone(),
+                                    asset_type,
+                                });
+                                custom_assets.import_path.clear();
+                            }
+                        }
+
+                        if !custom_assets.assets.is_empty() {
+                            ui.label("Imported Assets:");
+                            let mut to_select = custom_assets.selected_asset_idx;
+                            for (i, entry) in custom_assets.assets.iter().enumerate() {
+                                let label = format!(
+                                    "{} ({})",
+                                    entry.name,
+                                    match entry.asset_type {
+                                        CustomAssetType::Gltf => "GLTF",
+                                        CustomAssetType::Obj => "OBJ",
+                                        CustomAssetType::Image => "Texture",
+                                    }
+                                );
+                                let selected = to_select == Some(i);
+                                if ui.selectable_label(selected, &label).clicked() {
+                                    to_select = Some(i);
+                                    brush.tool = SculptTool::PlaceCustomAsset;
                                 }
-                            };
+                            }
+                            custom_assets.selected_asset_idx = to_select;
+                        }
 
-                            let pos = Vec3::new(x as f32 + offset_x, y, z as f32 + offset_z);
-                            let rot_y = hash * std::f32::consts::TAU;
+                        ui.separator();
+                    });
+                ui.separator();
 
-                            let rot = Quat::from_rotation_y(rot_y);
-                            let idx = map.prefabs.len();
+                // 6. Environment & Generation settings
+                egui::CollapsingHeader::new("⚙️ Environment & Generation")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        ui.heading("Water Plane Settings");
+                        ui.add(
+                            egui::Slider::new(&mut water_settings.height, -5.0..=15.0)
+                                .text("Water Level"),
+                        );
 
+                        ui.separator();
+                        ui.heading("Procedural Generator");
+                        ui.add(egui::Slider::new(&mut noise_settings.seed, 0..=9999).text("Seed"));
+                        ui.add(
+                            egui::Slider::new(&mut noise_settings.frequency, 0.005..=0.15)
+                                .text("Scale / Freq"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut noise_settings.octaves, 1..=8).text("Octaves"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut noise_settings.amplitude, 1.0..=25.0)
+                                .text("Max Height / Amp"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut noise_settings.ridge_exponent, 0.5..=4.0)
+                                .text("Ridge Exponent"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut noise_settings.height_offset, -5.0..=15.0)
+                                .text("Sea/Height Offset"),
+                        );
+
+                        ui.add_space(5.0);
+                        ui.label("Biomes to Include in Generation:");
+                        ui.horizontal(|ui| {
+                            ui.checkbox(&mut biome_selection.temperate, "Temperate");
+                            ui.checkbox(&mut biome_selection.arid, "Arid");
+                            ui.checkbox(&mut biome_selection.tundra, "Tundra");
+                            ui.checkbox(&mut biome_selection.arctic, "Arctic");
+                        });
+
+                        ui.add_space(3.0);
+                        ui.checkbox(
+                            &mut biome_selection.make_island,
+                            "🏝️ Generate as Island (Ocean Borders)",
+                        );
+                        ui.add_space(5.0);
+
+                        if ui.button("Generate Procedural Terrain").clicked() {
+                            // 1. Despawn existing visual prefabs and their children, then clear map.prefabs
+                            for (entity, _) in prefab_query.iter() {
+                                commands.entity(entity).despawn();
+                            }
+                            map.prefabs.clear();
+
+                            // 2. Generate new heightmap using fractal Perlin noise
+                            let perlin = PerlinNoise::new(noise_settings.seed);
+                            let w = map.width;
+                            let h = map.height;
+
+                            let mut active_biomes = Vec::new();
+                            if biome_selection.arctic {
+                                active_biomes.push(Biome::Arctic);
+                            }
+                            if biome_selection.tundra {
+                                active_biomes.push(Biome::Tundra);
+                            }
+                            if biome_selection.temperate {
+                                active_biomes.push(Biome::Temperate);
+                            }
+                            if biome_selection.arid {
+                                active_biomes.push(Biome::Arid);
+                            }
+                            if active_biomes.is_empty() {
+                                active_biomes.push(Biome::Temperate); // fallback
+                            }
+
+                            for z in 0..h {
+                                for x in 0..w {
+                                    let nx = x as f32 * noise_settings.frequency;
+                                    let nz = z as f32 * noise_settings.frequency;
+
+                                    // fBm fractal Perlin noise in [-1.0, 1.0]
+                                    let noise_val =
+                                        perlin.fbm(nx, nz, noise_settings.octaves, 2.0, 0.5);
+
+                                    // Scale & map to height
+                                    let normalized = (noise_val + 1.0) * 0.5;
+                                    let mut final_height = (normalized
+                                        .powf(noise_settings.ridge_exponent)
+                                        * noise_settings.amplitude)
+                                        - noise_settings.height_offset;
+
+                                    if biome_selection.make_island {
+                                        let dx = (x as f32 - (w as f32 / 2.0)) / (w as f32 / 2.0);
+                                        let dz = (z as f32 - (h as f32 / 2.0)) / (h as f32 / 2.0);
+                                        let d = (dx * dx + dz * dz).sqrt();
+                                        let mask = (1.0 - d.powf(2.2)).clamp(0.0, 1.0);
+                                        let ocean_depth = -6.0;
+                                        final_height =
+                                            final_height * mask + ocean_depth * (1.0 - mask);
+                                    }
+
+                                    map.set_height(x, z, final_height);
+
+                                    // Determine vertex biome procedurally based on active checklist selection
+                                    // Form organic north-to-south bands: Arctic (North) -> Tundra -> Temperate -> Arid/Desert (South)
+                                    let z_frac = z as f32 / h as f32;
+                                    let wobble =
+                                        perlin.fbm(x as f32 * 0.012, z as f32 * 0.012, 2, 2.0, 0.5)
+                                            * 0.07;
+                                    let val = (z_frac + wobble).clamp(0.0, 0.999);
+                                    let biome_idx =
+                                        (val * active_biomes.len() as f32).floor() as usize;
+                                    let vertex_biome = active_biomes[biome_idx];
+                                    map.set_biome(x, z, vertex_biome);
+                                }
+                            }
+
+                            // 2b. Clean up & initialize house and spawn point prefabs
+                            let house_pos = Vec3::new(0.0, 1.5, 0.0);
+                            let spawn_pos = Vec3::new(0.0, 2.0, 5.0);
+
+                            map.prefabs.push(PlacedPrefab {
+                                prefab_type: "house".to_string(),
+                                position: house_pos.to_array(),
+                                rotation: [0.0, 0.0, 0.0, 1.0],
+                                scale: [1.0, 1.0, 1.0],
+                                texture_override: None,
+                                rotation_y: Some(0.0),
+                                custom_mesh: None,
+                            });
+                            map.prefabs.push(PlacedPrefab {
+                                prefab_type: "spawn_point".to_string(),
+                                position: spawn_pos.to_array(),
+                                rotation: [0.0, 0.0, 0.0, 1.0],
+                                scale: [1.0, 1.0, 1.0],
+                                texture_override: None,
+                                rotation_y: Some(0.0),
+                                custom_mesh: None,
+                            });
+
+                            // Flatten the terrain under the house footprint to height 1.5
+                            let half_w =
+                                (mansion_settings.cols as f32 * mansion_settings.cell_size) / 2.0;
+                            let half_d =
+                                (mansion_settings.rows as f32 * mansion_settings.cell_size) / 2.0;
+                            let half_map_w = w as f32 / 2.0;
+                            let half_map_h = h as f32 / 2.0;
+
+                            let min_x_idx =
+                                ((house_pos.x - half_w - 2.0) + half_map_w).max(0.0) as u32;
+                            let max_x_idx =
+                                ((house_pos.x + half_w + 2.0) + half_map_w).min(w as f32) as u32;
+                            let min_z_idx =
+                                ((house_pos.z - half_d - 2.0) + half_map_h).max(0.0) as u32;
+                            let max_z_idx =
+                                ((house_pos.z + half_d + 2.0) + half_map_h).min(h as f32) as u32;
+
+                            for mz in min_z_idx..max_z_idx {
+                                for mx in min_x_idx..max_x_idx {
+                                    map.set_height(mx, mz, 1.5);
+                                    map.set_biome(mx, mz, Biome::Temperate);
+                                }
+                            }
+
+                            // Spawn visual entities for house and spawn point in the editor
                             spawn_prefab_visuals(
                                 &mut commands,
                                 &mut meshes,
                                 &mut materials,
-                                prefab_type,
-                                pos,
-                                rot,
+                                "house",
+                                house_pos,
+                                Quat::IDENTITY,
                                 Vec3::ONE,
                                 None,
                                 &mansion_settings,
-                                idx,
+                                0,
+                                &asset_server,
+                                None,
+                            );
+                            spawn_prefab_visuals(
+                                &mut commands,
+                                &mut meshes,
+                                &mut materials,
+                                "spawn_point",
+                                spawn_pos,
+                                Quat::IDENTITY,
+                                Vec3::ONE,
+                                None,
+                                &mansion_settings,
+                                1,
                                 &asset_server,
                                 None,
                             );
 
-                            map.prefabs.push(PlacedPrefab {
-                                prefab_type: prefab_type.to_string(),
-                                position: pos.to_array(),
-                                rotation: rot.to_array(),
-                                scale: [1.0, 1.0, 1.0],
-                                texture_override: None,
-                                rotation_y: Some(rot_y),
-                                custom_mesh: None,
-                            });
-                        }
-                    }
-                }
-            }
+                            // Generate roads and smooth the terrain underneath them
+                            generate_roads_on_map(&mut map);
 
-            // 4. Rebuild the 3D terrain mesh instantly with the biome's splatmap color scheme
-            for (entity, _) in terrain_query.iter() {
-                rebuild_terrain_mesh(entity, &mut commands, &map, &splat_settings, &mut meshes);
-            }
+                            // 3. Dynamic splatmap topology analyzer & spawner matching the active biome
+                            let density_factor = 0.04; // 4% chance to spawn trees/rocks in flat, fertile regions
+                            let offset_x = -(w as f32) / 2.0;
+                            let offset_z = -(h as f32) / 2.0;
+                            for z in 2..(h - 2) {
+                                for x in 2..(w - 2) {
+                                    let y = map.get_height(x, z);
 
-            // Despawn old bridges and spawn new ones
-            for bridge_entity in bridge_query.iter() {
-                commands.entity(bridge_entity).despawn();
-            }
-            spawn_editor_bridges(
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                &map,
-                &asset_server,
-            );
+                                    // Skip placing obstacles (trees, rocks, ores) directly on top of roads!
+                                    if map.get_road(x, z) > 0 {
+                                        continue;
+                                    }
 
-            // 5. Fire event to regenerate procedural grass across the new terrain
-            commands.run_system_cached(
-                |mut ev_grass: MessageWriter<crate::grass::GenerateGrassEvent>| {
-                    ev_grass.write(crate::grass::GenerateGrassEvent);
-                },
-            );
-        }
+                                    // Below beach or above snow level = no trees
+                                    if y <= splat_settings.sand_height
+                                        || y >= splat_settings.snow_height
+                                    {
+                                        continue;
+                                    }
 
-        ui.add_space(3.0);
-        if ui.button("Generate Road Network").clicked() {
-            generate_roads_on_map(&mut map);
-            for (entity, _) in terrain_query.iter() {
-                rebuild_terrain_mesh(entity, &mut commands, &map, &splat_settings, &mut meshes);
-            }
+                                    // Compute slope normal at this vertex
+                                    let y_l = map.get_height(x - 1, z);
+                                    let y_r = map.get_height(x + 1, z);
+                                    let y_u = map.get_height(x, z - 1);
+                                    let y_d = map.get_height(x, z + 1);
+                                    let normal = Vec3::new(y_l - y_r, 2.0, y_u - y_d).normalize();
 
-            // Despawn old bridges and spawn new ones
-            for bridge_entity in bridge_query.iter() {
-                commands.entity(bridge_entity).despawn();
-            }
-            spawn_editor_bridges(
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                &map,
-                &asset_server,
-            );
-        }
+                                    // If the slope is flat (meaning normal.y is above steepness threshold) - perfect grass area!
+                                    if normal.y >= splat_settings.cliff_steepness {
+                                        // Generate deterministic pseudo-random scatter hash
+                                        let hash = (((x * 123 + z * 4567) as f32).sin()
+                                            * 43_758.547)
+                                            .fract()
+                                            .abs();
+                                        if hash < density_factor {
+                                            // Assign prefab species based on the actual cell biome
+                                            let cell_biome = map.get_biome(x, z);
+                                            let prefab_type = match cell_biome {
+                                                Biome::Temperate => {
+                                                    if hash < density_factor * 0.4 {
+                                                        "tree_oak"
+                                                    } else if hash < density_factor * 0.75 {
+                                                        "tree_birch"
+                                                    } else if hash < density_factor * 0.93 {
+                                                        "shrub"
+                                                    } else {
+                                                        "rock"
+                                                    }
+                                                }
+                                                Biome::Arid => {
+                                                    if hash < density_factor * 0.5 {
+                                                        "cactus"
+                                                    } else {
+                                                        "rock"
+                                                    }
+                                                }
+                                                Biome::Tundra => {
+                                                    if hash < density_factor * 0.7 {
+                                                        "tree_pine"
+                                                    } else {
+                                                        "rock"
+                                                    }
+                                                }
+                                                Biome::Arctic => {
+                                                    if hash < density_factor * 0.4 {
+                                                        "tree_pine"
+                                                    } else {
+                                                        "rock"
+                                                    }
+                                                }
+                                            };
 
-        ui.separator();
-        ui.heading("File Operations");
-        ui.horizontal(|ui| {
-            ui.label("Path:");
-            ui.text_edit_singleline(&mut io_state.filename);
-        });
+                                            let pos = Vec3::new(
+                                                x as f32 + offset_x,
+                                                y,
+                                                z as f32 + offset_z,
+                                            );
+                                            let rot_y = hash * std::f32::consts::TAU;
 
-        ui.horizontal(|ui| {
-            if ui.button("Export JSON").clicked() {
-                match File::create(&io_state.filename) {
-                    Ok(mut file) => match serde_json::to_string_pretty(&*map) {
-                        Ok(json_str) => {
-                            if let Err(e) = file.write_all(json_str.as_bytes()) {
-                                io_state.status_message = format!("Error writing file: {}", e);
-                            } else {
-                                io_state.status_message = "Exported map successfully!".to_string();
+                                            let rot = Quat::from_rotation_y(rot_y);
+                                            let idx = map.prefabs.len();
+
+                                            spawn_prefab_visuals(
+                                                &mut commands,
+                                                &mut meshes,
+                                                &mut materials,
+                                                prefab_type,
+                                                pos,
+                                                rot,
+                                                Vec3::ONE,
+                                                None,
+                                                &mansion_settings,
+                                                idx,
+                                                &asset_server,
+                                                None,
+                                            );
+
+                                            map.prefabs.push(PlacedPrefab {
+                                                prefab_type: prefab_type.to_string(),
+                                                position: pos.to_array(),
+                                                rotation: rot.to_array(),
+                                                scale: [1.0, 1.0, 1.0],
+                                                texture_override: None,
+                                                rotation_y: Some(rot_y),
+                                                custom_mesh: None,
+                                            });
+                                        }
+                                    }
+                                }
                             }
-                        }
-                        Err(e) => {
-                            io_state.status_message = format!("Error serialising: {}", e);
-                        }
-                    },
-                    Err(e) => {
-                        io_state.status_message = format!("Error creating file: {}", e);
-                    }
-                }
-            }
 
-            if ui.button("Import JSON").clicked() {
-                match File::open(&io_state.filename) {
-                    Ok(mut file) => {
-                        let mut contents = String::new();
-                        if let Err(e) = file.read_to_string(&mut contents) {
-                            io_state.status_message = format!("Error reading file: {}", e);
-                        } else {
-                            match serde_json::from_str::<TempestMap>(&contents) {
-                                Ok(imported_map) => {
-                                    // Despawn existing visual prefabs first
-                                    for (entity, _) in prefab_query.iter() {
-                                        if let Ok(children) = children_query.get(entity) {
-                                            for child in children.iter() {
-                                                commands.entity(child).despawn();
+                            // 4. Rebuild the 3D terrain mesh instantly with the biome's splatmap color scheme
+                            for (entity, _) in terrain_query.iter() {
+                                rebuild_terrain_mesh(
+                                    entity,
+                                    &mut commands,
+                                    &map,
+                                    &splat_settings,
+                                    &mut meshes,
+                                );
+                            }
+
+                            // Despawn old bridges and spawn new ones
+                            for bridge_entity in bridge_query.iter() {
+                                commands.entity(bridge_entity).despawn();
+                            }
+                            spawn_editor_bridges(
+                                &mut commands,
+                                &mut meshes,
+                                &mut materials,
+                                &map,
+                                &asset_server,
+                            );
+
+                            // 5. Fire event to regenerate procedural grass across the new terrain
+                            commands.run_system_cached(
+                                |mut ev_grass: MessageWriter<crate::grass::GenerateGrassEvent>| {
+                                    ev_grass.write(crate::grass::GenerateGrassEvent);
+                                },
+                            );
+                        }
+
+                        ui.add_space(3.0);
+                        if ui.button("Generate Road Network").clicked() {
+                            generate_roads_on_map(&mut map);
+                            for (entity, _) in terrain_query.iter() {
+                                rebuild_terrain_mesh(
+                                    entity,
+                                    &mut commands,
+                                    &map,
+                                    &splat_settings,
+                                    &mut meshes,
+                                );
+                            }
+
+                            // Despawn old bridges and spawn new ones
+                            for bridge_entity in bridge_query.iter() {
+                                commands.entity(bridge_entity).despawn();
+                            }
+                            spawn_editor_bridges(
+                                &mut commands,
+                                &mut meshes,
+                                &mut materials,
+                                &map,
+                                &asset_server,
+                            );
+                        }
+
+                        ui.separator();
+                    });
+                ui.separator();
+
+                // 7. Save & Load Map File operations
+                egui::CollapsingHeader::new("💾 Save & Load Map")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        ui.heading("File Operations");
+                        ui.horizontal(|ui| {
+                            ui.label("Path:");
+                            ui.text_edit_singleline(&mut io_state.filename);
+                        });
+
+                        ui.horizontal(|ui| {
+                            if ui.button("Export JSON").clicked() {
+                                match File::create(&io_state.filename) {
+                                    Ok(mut file) => match serde_json::to_string_pretty(&*map) {
+                                        Ok(json_str) => {
+                                            if let Err(e) = file.write_all(json_str.as_bytes()) {
+                                                io_state.status_message =
+                                                    format!("Error writing file: {}", e);
+                                            } else {
+                                                io_state.status_message =
+                                                    "Exported map successfully!".to_string();
                                             }
                                         }
-                                        commands.entity(entity).despawn();
-                                    }
-
-                                    let mut imported_map = imported_map;
-                                    for p in imported_map.prefabs.iter_mut() {
-                                        if p.rotation == [0.0, 0.0, 0.0, 1.0]
-                                            && let Some(ry) = p.rotation_y
-                                        {
-                                            let half = ry * 0.5;
-                                            p.rotation = [0.0, half.sin(), 0.0, half.cos()];
+                                        Err(e) => {
+                                            io_state.status_message =
+                                                format!("Error serialising: {}", e);
                                         }
+                                    },
+                                    Err(e) => {
+                                        io_state.status_message =
+                                            format!("Error creating file: {}", e);
                                     }
-                                    *map = imported_map;
-                                    io_state.status_message =
-                                        "Imported map successfully!".to_string();
-
-                                    // Re-spawn loaded prefabs visually in the editor viewport!
-                                    for (idx, prefab) in map.prefabs.iter().enumerate() {
-                                        let pos = Vec3::from_array(prefab.position);
-                                        let rot = Quat::from_array(prefab.rotation);
-                                        let scale = Vec3::from_array(prefab.scale);
-                                        spawn_prefab_visuals(
-                                            &mut commands,
-                                            &mut meshes,
-                                            &mut materials,
-                                            &prefab.prefab_type,
-                                            pos,
-                                            rot,
-                                            scale,
-                                            prefab.texture_override.as_deref(),
-                                            &mansion_settings,
-                                            idx,
-                                            &asset_server,
-                                            prefab.custom_mesh.as_ref(),
-                                        );
-                                    }
-
-                                    for (entity, _) in terrain_query.iter() {
-                                        rebuild_terrain_mesh(
-                                            entity,
-                                            &mut commands,
-                                            &map,
-                                            &splat_settings,
-                                            &mut meshes,
-                                        );
-                                    }
-                                }
-                                Err(e) => {
-                                    io_state.status_message = format!("Error deserialising: {}", e);
                                 }
                             }
+
+                            if ui.button("Import JSON").clicked() {
+                                match File::open(&io_state.filename) {
+                                    Ok(mut file) => {
+                                        let mut contents = String::new();
+                                        if let Err(e) = file.read_to_string(&mut contents) {
+                                            io_state.status_message =
+                                                format!("Error reading file: {}", e);
+                                        } else {
+                                            match serde_json::from_str::<TempestMap>(&contents) {
+                                                Ok(imported_map) => {
+                                                    // Despawn existing visual prefabs first
+                                                    for (entity, _) in prefab_query.iter() {
+                                                        if let Ok(children) =
+                                                            children_query.get(entity)
+                                                        {
+                                                            for child in children.iter() {
+                                                                commands.entity(child).despawn();
+                                                            }
+                                                        }
+                                                        commands.entity(entity).despawn();
+                                                    }
+
+                                                    let mut imported_map = imported_map;
+                                                    for p in imported_map.prefabs.iter_mut() {
+                                                        if p.rotation == [0.0, 0.0, 0.0, 1.0]
+                                                            && let Some(ry) = p.rotation_y
+                                                        {
+                                                            let half = ry * 0.5;
+                                                            p.rotation =
+                                                                [0.0, half.sin(), 0.0, half.cos()];
+                                                        }
+                                                    }
+                                                    *map = imported_map;
+                                                    io_state.status_message =
+                                                        "Imported map successfully!".to_string();
+
+                                                    // Re-spawn loaded prefabs visually in the editor viewport!
+                                                    for (idx, prefab) in
+                                                        map.prefabs.iter().enumerate()
+                                                    {
+                                                        let pos = Vec3::from_array(prefab.position);
+                                                        let rot = Quat::from_array(prefab.rotation);
+                                                        let scale = Vec3::from_array(prefab.scale);
+                                                        spawn_prefab_visuals(
+                                                            &mut commands,
+                                                            &mut meshes,
+                                                            &mut materials,
+                                                            &prefab.prefab_type,
+                                                            pos,
+                                                            rot,
+                                                            scale,
+                                                            prefab.texture_override.as_deref(),
+                                                            &mansion_settings,
+                                                            idx,
+                                                            &asset_server,
+                                                            prefab.custom_mesh.as_ref(),
+                                                        );
+                                                    }
+
+                                                    for (entity, _) in terrain_query.iter() {
+                                                        rebuild_terrain_mesh(
+                                                            entity,
+                                                            &mut commands,
+                                                            &map,
+                                                            &splat_settings,
+                                                            &mut meshes,
+                                                        );
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    io_state.status_message =
+                                                        format!("Error deserialising: {}", e);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        io_state.status_message =
+                                            format!("Error opening file: {}", e);
+                                    }
+                                }
+                            }
+                        });
+                    });
+                ui.separator();
+
+                // 8. Resize Map settings
+                egui::CollapsingHeader::new("🔧 Resize Map Dimensions")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        ui.heading("Resize Map");
+                        ui.label(format!("Current Size: {} x {}", map.width, map.height));
+                        ui.add(
+                            egui::Slider::new(&mut resize_settings.width, 32..=1200)
+                                .step_by(16.0)
+                                .text("New Width"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut resize_settings.height, 32..=1200)
+                                .step_by(16.0)
+                                .text("New Height"),
+                        );
+                        if ui.button("🔧 Resize Map & Rebuild").clicked() {
+                            let new_w = resize_settings.width;
+                            let new_h = resize_settings.height;
+                            map.resize(new_w, new_h);
+
+                            // Rebuild terrain mesh fully
+                            for (entity, _) in terrain_query.iter() {
+                                let new_mesh = generate_terrain_mesh(&map, &splat_settings);
+                                let new_handle = meshes.add(new_mesh);
+                                commands.entity(entity).insert(Mesh3d(new_handle));
+                            }
+
+                            // Rebuild water mesh fully & replace simulation component
+                            for (water_entity, _) in water_query.iter() {
+                                let new_handle = meshes.add(generate_water_mesh(new_w, new_h));
+                                commands.entity(water_entity).insert(Mesh3d(new_handle));
+                                commands
+                                    .entity(water_entity)
+                                    .insert(WaterSimData::new(new_w, new_h));
+                            }
+                            io_state.status_message =
+                                format!("Resized map to {}x{} successfully!", new_w, new_h);
                         }
-                    }
-                    Err(e) => {
-                        io_state.status_message = format!("Error opening file: {}", e);
-                    }
+
+                        ui.separator();
+                    });
+                ui.separator();
+
+                // 9. Keyboard Controls & Help
+                egui::CollapsingHeader::new("❓ Keyboard Controls & Help")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        ui.label("Controls:");
+                        ui.label("- Left Mouse Button to sculpt");
+                        ui.label("- Hold Right Mouse Button + move to Orbit");
+                        ui.label("- Scroll wheel to Zoom");
+                        ui.label("- Hold Middle Mouse Button + move to Pan");
+                        ui.separator();
+                    });
+
+                // Status message (if any)
+                ui.separator();
+                if !io_state.status_message.is_empty() {
+                    ui.add(egui::Label::new(
+                        egui::RichText::new(&io_state.status_message)
+                            .color(egui::Color32::from_rgb(100, 255, 100))
+                            .strong(),
+                    ));
                 }
-            }
+
+                ui.separator();
+
+                ui.separator();
+                if ui.button("Back to Main Menu").clicked() {
+                    next_state.set(AppState::MainMenu);
+                }
+            });
         });
-
-        if !io_state.status_message.is_empty() {
-            ui.add(egui::Label::new(
-                egui::RichText::new(&io_state.status_message)
-                    .color(egui::Color32::from_rgb(100, 255, 100))
-                    .strong(),
-            ));
-        }
-
-        ui.separator();
-        ui.heading("Resize Map");
-        ui.label(format!("Current Size: {} x {}", map.width, map.height));
-        ui.add(
-            egui::Slider::new(&mut resize_settings.width, 32..=1200)
-                .step_by(16.0)
-                .text("New Width"),
-        );
-        ui.add(
-            egui::Slider::new(&mut resize_settings.height, 32..=1200)
-                .step_by(16.0)
-                .text("New Height"),
-        );
-        if ui.button("🔧 Resize Map & Rebuild").clicked() {
-            let new_w = resize_settings.width;
-            let new_h = resize_settings.height;
-            map.resize(new_w, new_h);
-
-            // Rebuild terrain mesh fully
-            for (entity, _) in terrain_query.iter() {
-                let new_mesh = generate_terrain_mesh(&map, &splat_settings);
-                let new_handle = meshes.add(new_mesh);
-                commands.entity(entity).insert(Mesh3d(new_handle));
-            }
-
-            // Rebuild water mesh fully & replace simulation component
-            for (water_entity, _) in water_query.iter() {
-                let new_handle = meshes.add(generate_water_mesh(new_w, new_h));
-                commands.entity(water_entity).insert(Mesh3d(new_handle));
-                commands
-                    .entity(water_entity)
-                    .insert(WaterSimData::new(new_w, new_h));
-            }
-            io_state.status_message = format!("Resized map to {}x{} successfully!", new_w, new_h);
-        }
-
-        ui.separator();
-        ui.label("Controls:");
-        ui.label("- Left Mouse Button to sculpt");
-        ui.label("- Hold Right Mouse Button + move to Orbit");
-        ui.label("- Scroll wheel to Zoom");
-        ui.label("- Hold Middle Mouse Button + move to Pan");
-        ui.separator();
-        if ui.button("Back to Main Menu").clicked() {
-            next_state.set(AppState::MainMenu);
-        }
-    });
 }
 
 fn camera_controller(
@@ -3597,11 +3955,15 @@ fn calculate_snap(
                                         2.0
                                     };
                                     let mut target_pos = w_pos + w_norm * half_dim;
-                                    
+
                                     // Height lock: align target height exactly with parent tile
-                                    if prefab_type == "ceiling_tile" && other.prefab_type == "floor_tile" {
+                                    if prefab_type == "ceiling_tile"
+                                        && other.prefab_type == "floor_tile"
+                                    {
                                         target_pos.y = other_pos.y + 3.5;
-                                    } else if prefab_type == "floor_tile" && other.prefab_type == "ceiling_tile" {
+                                    } else if prefab_type == "floor_tile"
+                                        && other.prefab_type == "ceiling_tile"
+                                    {
                                         target_pos.y = other_pos.y - 3.5;
                                     } else {
                                         target_pos.y = other_pos.y;
@@ -3623,10 +3985,14 @@ fn calculate_snap(
                                     } else {
                                         2.0
                                     };
-                                    let z_offset = if local_cursor.z >= 0.0 { half_dim } else { -half_dim };
+                                    let z_offset = if local_cursor.z >= 0.0 {
+                                        half_dim
+                                    } else {
+                                        -half_dim
+                                    };
                                     let offset_vec = other_rot * Vec3::new(0.0, 0.0, z_offset);
                                     let mut target_pos = w_pos + offset_vec;
-                                    
+
                                     // Align Y with the socket Y height exactly
                                     target_pos.y = w_pos.y;
                                     best_pos = Some(target_pos);
@@ -3653,10 +4019,12 @@ fn calculate_snap(
                                     let local_norm = other_rot.inverse() * w_norm;
                                     if local_norm.z < 0.0 {
                                         // Snap bottom of new roof to top of old roof
-                                        best_pos = Some(w_pos - other_rot * Vec3::new(0.0, 0.05, 1.64));
+                                        best_pos =
+                                            Some(w_pos - other_rot * Vec3::new(0.0, 0.05, 1.64));
                                     } else {
                                         // Snap top of new roof to bottom of old roof
-                                        best_pos = Some(w_pos - other_rot * Vec3::new(0.0, 2.35, -1.64));
+                                        best_pos =
+                                            Some(w_pos - other_rot * Vec3::new(0.0, 2.35, -1.64));
                                     }
                                 } else if other.prefab_type == "wall_straight"
                                     || other.prefab_type == "door_frame"
@@ -3668,7 +4036,8 @@ fn calculate_snap(
                                     let local_norm = other_rot.inverse() * w_norm;
                                     if local_norm.y > 0.0 {
                                         // Snap bottom of roof to top of wall
-                                        best_pos = Some(w_pos - other_rot * Vec3::new(0.0, 0.05, 1.64));
+                                        best_pos =
+                                            Some(w_pos - other_rot * Vec3::new(0.0, 0.05, 1.64));
                                     } else {
                                         best_pos = Some(w_pos);
                                     }
@@ -3708,9 +4077,15 @@ fn calculate_snap(
                 (2.0f32, 4.0f32)
             } else if p.prefab_type == "floor_tile" || p.prefab_type == "ceiling_tile" {
                 (2.0f32, 2.0f32)
-            } else if p.prefab_type == "wall_straight" || p.prefab_type == "door_frame" || p.prefab_type == "window_frame" {
+            } else if p.prefab_type == "wall_straight"
+                || p.prefab_type == "door_frame"
+                || p.prefab_type == "window_frame"
+            {
                 (2.0f32, 0.2f32)
-            } else if p.prefab_type == "wall_corner" || p.prefab_type == "wall_t_junction" || p.prefab_type == "wall_cross" {
+            } else if p.prefab_type == "wall_corner"
+                || p.prefab_type == "wall_t_junction"
+                || p.prefab_type == "wall_cross"
+            {
                 (2.0f32, 2.0f32)
             } else if p.prefab_type == "room_pillar" {
                 (0.5f32, 0.5f32)
@@ -3877,6 +4252,7 @@ fn terrain_sculpting_system(
     terrain_query: Query<(Entity, &Mesh3d), With<TerrainMesh>>,
     brush: ResMut<BrushSettings>,
     mouse_button: Res<ButtonInput<MouseButton>>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     mut gizmos: Gizmos,
     mut impulse_writer: MessageWriter<WaterImpulseEvent>,
@@ -4100,6 +4476,36 @@ fn terrain_sculpting_system(
                 | "hallway_segment"
         );
 
+        // Listen to R key for prefab rotation
+        if keyboard_input.just_pressed(KeyCode::KeyR) {
+            selection_state.placement_rotation_angle = (selection_state.placement_rotation_angle
+                + std::f32::consts::FRAC_PI_2)
+                % std::f32::consts::TAU;
+        }
+
+        // Listen to Arrow keys for smooth rotation
+        if keyboard_input.pressed(KeyCode::ArrowLeft) {
+            selection_state.placement_rotation_angle = (selection_state.placement_rotation_angle
+                + 1.8 * time.delta_secs())
+                % std::f32::consts::TAU;
+        }
+        if keyboard_input.pressed(KeyCode::ArrowRight) {
+            selection_state.placement_rotation_angle = (selection_state.placement_rotation_angle
+                - 1.8 * time.delta_secs())
+                % std::f32::consts::TAU;
+        }
+
+        // Listen to F key to flip/mirror placing prefab
+        if keyboard_input.just_pressed(KeyCode::KeyF) {
+            selection_state.placement_flipped = !selection_state.placement_flipped;
+        }
+
+        let placement_scale = if selection_state.placement_flipped {
+            Vec3::new(-1.0, 1.0, 1.0)
+        } else {
+            Vec3::ONE
+        };
+
         let (place_pos, rotation, scale) = if is_modular {
             let (snapped_pos, snapped_rot) = calculate_snap(
                 prefab_type,
@@ -4111,7 +4517,9 @@ fn terrain_sculpting_system(
                 selection_state.snap_grid_size,
                 selection_state.snap_to_objects,
             );
-            (snapped_pos, snapped_rot, Vec3::ONE)
+            let final_rot =
+                snapped_rot * Quat::from_rotation_y(selection_state.placement_rotation_angle);
+            (snapped_pos, final_rot, placement_scale)
         } else {
             let is_prop = matches!(
                 prefab_type,
@@ -4126,24 +4534,22 @@ fn terrain_sculpting_system(
                     | "prop_health_pack"
                     | "prop_crate"
             );
-            let rot_y = if is_prop {
-                let camera_forward = if let Ok((_, cam_gt)) = camera_query.single() {
-                    let f = cam_gt.forward();
-                    Vec3::new(f.x, 0.0, f.z).normalize_or_zero()
-                } else {
-                    Vec3::NEG_Z
-                };
-                if camera_forward != Vec3::ZERO {
-                    let angle = camera_forward.z.atan2(camera_forward.x);
-                    -angle - std::f32::consts::FRAC_PI_2
-                } else {
-                    0.0
-                }
+            let rot_y = if prefab_type == "house"
+                || prefab_type == "custom_mesh"
+                || prefab_type == "custom_asset"
+                || is_prop
+            {
+                0.0
             } else {
-                let seed = (intersection.x * 12.9898 + intersection.z * 78.233).sin() * 43758.5453;
+                let seed = (intersection.x * 12.9898 + intersection.z * 78.233).sin() * 43758.547;
                 seed.fract() * std::f32::consts::TAU
             };
-            (intersection, Quat::from_rotation_y(rot_y), Vec3::ONE)
+            let final_rot = Quat::from_rotation_y(rot_y + selection_state.placement_rotation_angle);
+            let mut final_pos = intersection;
+            if prefab_type == "custom_mesh" {
+                final_pos.y += 1.0;
+            }
+            (final_pos, final_rot, placement_scale)
         };
 
         let tex_override: Option<&str> = if prefab_type == "custom_asset" {
@@ -4159,6 +4565,8 @@ fn terrain_sculpting_system(
         if let Some(_prev_ent) = selection_state.preview_entity {
             if selection_state.preview_tool != Some(brush.tool) {
                 despawn_preview_entity(&mut commands, &mut selection_state, &children_query);
+                selection_state.placement_rotation_angle = 0.0;
+                selection_state.placement_flipped = false;
                 spawn_new = true;
             }
         } else {
@@ -4185,7 +4593,10 @@ fn terrain_sculpting_system(
                 .id();
 
             let preview_custom_mesh = if prefab_type == "custom_mesh" {
-                Some(EditableMesh::new_cube(2.0))
+                match selection_state.custom_mesh_primitive {
+                    CustomMeshPrimitive::Cube => Some(EditableMesh::new_cube(2.0)),
+                    CustomMeshPrimitive::Sphere => Some(EditableMesh::new_sphere(1.0)),
+                }
             } else {
                 None
             };
@@ -4560,6 +4971,12 @@ fn terrain_sculpting_system(
                     }
                 }
 
+                let placement_scale = if selection_state.placement_flipped {
+                    Vec3::new(-1.0, 1.0, 1.0)
+                } else {
+                    Vec3::ONE
+                };
+
                 // Calculate position and rotation based on snapping or random rotation
                 let (place_pos, rotation, scale) = if is_modular {
                     let (snapped_pos, snapped_rot) = calculate_snap(
@@ -4572,7 +4989,9 @@ fn terrain_sculpting_system(
                         selection_state.snap_grid_size,
                         selection_state.snap_to_objects,
                     );
-                    (snapped_pos, snapped_rot, Vec3::ONE)
+                    let final_rot = snapped_rot
+                        * Quat::from_rotation_y(selection_state.placement_rotation_angle);
+                    (snapped_pos, final_rot, placement_scale)
                 } else {
                     let is_prop = matches!(
                         prefab_type,
@@ -4587,24 +5006,24 @@ fn terrain_sculpting_system(
                             | "prop_health_pack"
                             | "prop_crate"
                     );
-                    let rot_y = if is_prop {
-                        let camera_forward = if let Ok((_, cam_gt)) = camera_query.single() {
-                            let f = cam_gt.forward();
-                            Vec3::new(f.x, 0.0, f.z).normalize_or_zero()
-                        } else {
-                            Vec3::NEG_Z
-                        };
-                        if camera_forward != Vec3::ZERO {
-                            let angle = camera_forward.z.atan2(camera_forward.x);
-                            -angle - std::f32::consts::FRAC_PI_2
-                        } else {
-                            0.0
-                        }
+                    let rot_y = if prefab_type == "house"
+                        || prefab_type == "custom_mesh"
+                        || prefab_type == "custom_asset"
+                        || is_prop
+                    {
+                        0.0
                     } else {
-                        let seed = (intersection.x * 12.9898 + intersection.z * 78.233).sin() * 43758.5453;
+                        let seed =
+                            (intersection.x * 12.9898 + intersection.z * 78.233).sin() * 43758.547;
                         seed.fract() * std::f32::consts::TAU
                     };
-                    (intersection, Quat::from_rotation_y(rot_y), Vec3::ONE)
+                    let final_rot =
+                        Quat::from_rotation_y(rot_y + selection_state.placement_rotation_angle);
+                    let mut final_pos = intersection;
+                    if prefab_type == "custom_mesh" {
+                        final_pos.y += 1.0;
+                    }
+                    (final_pos, final_rot, placement_scale)
                 };
 
                 // For custom assets, store the file path in texture_override
@@ -4618,7 +5037,10 @@ fn terrain_sculpting_system(
                 };
 
                 let custom_mesh_data = if prefab_type == "custom_mesh" {
-                    Some(EditableMesh::new_cube(2.0))
+                    match selection_state.custom_mesh_primitive {
+                        CustomMeshPrimitive::Cube => Some(EditableMesh::new_cube(2.0)),
+                        CustomMeshPrimitive::Sphere => Some(EditableMesh::new_sphere(1.0)),
+                    }
                 } else {
                     None
                 };
@@ -4756,6 +5178,7 @@ fn terrain_sculpting_system(
                             &mut meshes,
                         );
                     }
+                    grass_writer.write(crate::grass::GenerateGrassEvent);
                 }
 
                 // Flatten terrain under floor tiles and hallway segments
@@ -5590,7 +6013,7 @@ pub fn spawn_editor_bridges(
 
     for z in 0..map.height {
         for x in 0..map.width {
-            if map.get_road(x, z) == 3 {
+            if map.get_road(x, z) == 3 && map.get_height(x, z) <= 1.2 {
                 let vx = x as f32 + offset_x;
                 let vz = z as f32 + offset_z;
 

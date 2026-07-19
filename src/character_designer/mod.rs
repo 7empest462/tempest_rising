@@ -33,7 +33,11 @@ pub struct CharacterSettings {
     pub eye_color: Color,
     pub hair_style: HairStyle,
     pub hair_color: Color,
-    pub head_scale: f32, // 0.8 to 1.3
+    pub head_scale: f32,     // 0.8 to 1.3
+    pub muscle_mass: f32,    // 0.0 to 1.5
+    pub shoulder_width: f32, // 0.7 to 1.4
+    pub leg_length: f32,     // 0.7 to 1.4
+    pub waist_width: f32,    // 0.7 to 1.4
     pub custom_name: String,
     pub is_ragdoll_active: bool,
     pub is_sprite_rendered: bool,
@@ -52,6 +56,10 @@ impl Default for CharacterSettings {
             hair_style: HairStyle::Short,
             hair_color: Color::srgb(0.4, 0.25, 0.15),
             head_scale: 1.2,
+            muscle_mass: 0.2,
+            shoulder_width: 1.0,
+            leg_length: 1.0,
+            waist_width: 1.0,
             custom_name: "Tempest".to_string(),
             is_ragdoll_active: false,
             is_sprite_rendered: false,
@@ -86,6 +94,9 @@ pub struct RagdollPhysics {
     pub nodes: Vec<RagdollNode>,
     pub constraints: Vec<RagdollConstraint>,
 }
+
+#[derive(Component)]
+pub struct CharacterModelPart;
 
 #[derive(Component)]
 pub struct CharacterVisualEntity;
@@ -204,120 +215,141 @@ fn cleanup_character_designer(
 fn initialize_ragdoll_skeleton(settings: &CharacterSettings, physics: &mut RagdollPhysics) {
     let h = settings.height;
     let w_thick = settings.weight;
+    let muscle = settings.muscle_mass;
+    let sh_w = settings.shoulder_width;
+    let leg_len = settings.leg_length;
+    let waist = settings.waist_width;
+
+    // Realistic proportional heights
+    let pelvis_y = h * 0.45 * (2.0 - leg_len);
+    let spine_y = pelvis_y + (h * 0.15);
+    let chest_y = pelvis_y + (h * 0.3);
+    let head_y = chest_y + (h * 0.18);
+
+    let knee_y = pelvis_y * 0.5;
+
+    // Muscle and waist adjustments on joint radii
+    let pelvis_rad = 0.15 * w_thick * waist;
+    let spine_rad = 0.15 * w_thick * (0.8 + waist * 0.2);
+    let chest_rad = 0.17 * w_thick * (1.0 + muscle * 0.15);
+    let head_rad = 0.14 * settings.head_scale;
+
+    let arm_rad = 0.08 * w_thick * (1.0 + muscle * 0.18);
+    let leg_rad = 0.09 * w_thick * (1.0 + muscle * 0.15);
 
     let nodes = vec![
         RagdollNode {
             name: "Pelvis".to_string(),
-            position: Vec3::new(0.0, h * 0.5, 0.0),
-            old_position: Vec3::new(0.0, h * 0.5, 0.0),
-            radius: 0.15 * w_thick,
+            position: Vec3::new(0.0, pelvis_y, 0.0),
+            old_position: Vec3::new(0.0, pelvis_y, 0.0),
+            radius: pelvis_rad,
             offset_from_parent: Vec3::ZERO,
             parent_name: "".to_string(),
         },
         RagdollNode {
             name: "Spine".to_string(),
-            position: Vec3::new(0.0, h * 0.65, 0.0),
-            old_position: Vec3::new(0.0, h * 0.65, 0.0),
-            radius: 0.16 * w_thick,
-            offset_from_parent: Vec3::new(0.0, h * 0.15, 0.0),
+            position: Vec3::new(0.0, spine_y, 0.0),
+            old_position: Vec3::new(0.0, spine_y, 0.0),
+            radius: spine_rad,
+            offset_from_parent: Vec3::new(0.0, spine_y - pelvis_y, 0.0),
             parent_name: "Pelvis".to_string(),
         },
         RagdollNode {
             name: "Chest".to_string(),
-            position: Vec3::new(0.0, h * 0.8, 0.0),
-            old_position: Vec3::new(0.0, h * 0.8, 0.0),
-            radius: 0.18 * w_thick,
-            offset_from_parent: Vec3::new(0.0, h * 0.15, 0.0),
+            position: Vec3::new(0.0, chest_y, 0.0),
+            old_position: Vec3::new(0.0, chest_y, 0.0),
+            radius: chest_rad,
+            offset_from_parent: Vec3::new(0.0, chest_y - spine_y, 0.0),
             parent_name: "Spine".to_string(),
         },
         RagdollNode {
             name: "Head".to_string(),
-            position: Vec3::new(0.0, h * 0.98, 0.0),
-            old_position: Vec3::new(0.0, h * 0.98, 0.0),
-            radius: 0.14 * settings.head_scale,
-            offset_from_parent: Vec3::new(0.0, h * 0.18, 0.0),
+            position: Vec3::new(0.0, head_y, 0.0),
+            old_position: Vec3::new(0.0, head_y, 0.0),
+            radius: head_rad,
+            offset_from_parent: Vec3::new(0.0, head_y - chest_y, 0.0),
             parent_name: "Chest".to_string(),
         },
         // Arms
         RagdollNode {
             name: "L_Shoulder".to_string(),
-            position: Vec3::new(-0.25 * w_thick, h * 0.8, 0.0),
-            old_position: Vec3::new(-0.25 * w_thick, h * 0.8, 0.0),
-            radius: 0.08 * w_thick,
-            offset_from_parent: Vec3::new(-0.25 * w_thick, 0.0, 0.0),
+            position: Vec3::new(-0.25 * w_thick * sh_w, chest_y, 0.0),
+            old_position: Vec3::new(-0.25 * w_thick * sh_w, chest_y, 0.0),
+            radius: arm_rad,
+            offset_from_parent: Vec3::new(-0.25 * w_thick * sh_w, 0.0, 0.0),
             parent_name: "Chest".to_string(),
         },
         RagdollNode {
             name: "L_Elbow".to_string(),
-            position: Vec3::new(-0.5 * w_thick, h * 0.8, 0.0),
-            old_position: Vec3::new(-0.5 * w_thick, h * 0.8, 0.0),
-            radius: 0.07 * w_thick,
-            offset_from_parent: Vec3::new(-0.25 * w_thick, 0.0, 0.0),
+            position: Vec3::new(-0.5 * w_thick * sh_w, chest_y, 0.0),
+            old_position: Vec3::new(-0.5 * w_thick * sh_w, chest_y, 0.0),
+            radius: arm_rad * 0.9,
+            offset_from_parent: Vec3::new(-0.25 * w_thick * sh_w, 0.0, 0.0),
             parent_name: "L_Shoulder".to_string(),
         },
         RagdollNode {
             name: "R_Shoulder".to_string(),
-            position: Vec3::new(0.25 * w_thick, h * 0.8, 0.0),
-            old_position: Vec3::new(0.25 * w_thick, h * 0.8, 0.0),
-            radius: 0.08 * w_thick,
-            offset_from_parent: Vec3::new(0.25 * w_thick, 0.0, 0.0),
+            position: Vec3::new(0.25 * w_thick * sh_w, chest_y, 0.0),
+            old_position: Vec3::new(0.25 * w_thick * sh_w, chest_y, 0.0),
+            radius: arm_rad,
+            offset_from_parent: Vec3::new(0.25 * w_thick * sh_w, 0.0, 0.0),
             parent_name: "Chest".to_string(),
         },
         RagdollNode {
             name: "R_Elbow".to_string(),
-            position: Vec3::new(0.5 * w_thick, h * 0.8, 0.0),
-            old_position: Vec3::new(0.5 * w_thick, h * 0.8, 0.0),
-            radius: 0.07 * w_thick,
-            offset_from_parent: Vec3::new(0.25 * w_thick, 0.0, 0.0),
+            position: Vec3::new(0.5 * w_thick * sh_w, chest_y, 0.0),
+            old_position: Vec3::new(0.5 * w_thick * sh_w, chest_y, 0.0),
+            radius: arm_rad * 0.9,
+            offset_from_parent: Vec3::new(0.25 * w_thick * sh_w, 0.0, 0.0),
             parent_name: "R_Shoulder".to_string(),
         },
         // Legs
         RagdollNode {
             name: "L_Hip".to_string(),
-            position: Vec3::new(-0.16 * w_thick, h * 0.45, 0.0),
-            old_position: Vec3::new(-0.16 * w_thick, h * 0.45, 0.0),
-            radius: 0.1 * w_thick,
-            offset_from_parent: Vec3::new(-0.16 * w_thick, -0.05 * h, 0.0),
+            position: Vec3::new(-0.16 * w_thick * waist, pelvis_y, 0.0),
+            old_position: Vec3::new(-0.16 * w_thick * waist, pelvis_y, 0.0),
+            radius: leg_rad,
+            offset_from_parent: Vec3::new(-0.16 * w_thick * waist, 0.0, 0.0),
             parent_name: "Pelvis".to_string(),
         },
         RagdollNode {
             name: "L_Knee".to_string(),
-            position: Vec3::new(-0.16 * w_thick, h * 0.22, 0.0),
-            old_position: Vec3::new(-0.16 * w_thick, h * 0.22, 0.0),
-            radius: 0.09 * w_thick,
-            offset_from_parent: Vec3::new(0.0, -0.23 * h, 0.0),
+            position: Vec3::new(-0.16 * w_thick * waist, knee_y, 0.0),
+            old_position: Vec3::new(-0.16 * w_thick * waist, knee_y, 0.0),
+            radius: leg_rad * 0.9,
+            offset_from_parent: Vec3::new(0.0, -knee_y, 0.0),
             parent_name: "L_Hip".to_string(),
         },
         RagdollNode {
             name: "L_Foot".to_string(),
-            position: Vec3::new(-0.16 * w_thick, 0.0, 0.0),
-            old_position: Vec3::new(-0.16 * w_thick, 0.0, 0.0),
-            radius: 0.08 * w_thick,
-            offset_from_parent: Vec3::new(0.0, -0.22 * h, 0.0),
+            position: Vec3::new(-0.16 * w_thick * waist, 0.0, 0.0),
+            old_position: Vec3::new(-0.16 * w_thick * waist, 0.0, 0.0),
+            radius: leg_rad * 0.8,
+            offset_from_parent: Vec3::new(0.0, -knee_y, 0.0),
             parent_name: "L_Knee".to_string(),
         },
         RagdollNode {
             name: "R_Hip".to_string(),
-            position: Vec3::new(0.16 * w_thick, h * 0.45, 0.0),
-            old_position: Vec3::new(0.16 * w_thick, h * 0.45, 0.0),
-            radius: 0.1 * w_thick,
-            offset_from_parent: Vec3::new(0.16 * w_thick, -0.05 * h, 0.0),
+            position: Vec3::new(0.16 * w_thick * waist, pelvis_y, 0.0),
+            old_position: Vec3::new(0.16 * w_thick * waist, pelvis_y, 0.0),
+            radius: leg_rad,
+            offset_from_parent: Vec3::new(0.16 * w_thick * waist, 0.0, 0.0),
             parent_name: "Pelvis".to_string(),
         },
         RagdollNode {
             name: "R_Knee".to_string(),
-            position: Vec3::new(0.16 * w_thick, h * 0.22, 0.0),
-            old_position: Vec3::new(0.16 * w_thick, h * 0.22, 0.0),
-            radius: 0.09 * w_thick,
-            offset_from_parent: Vec3::new(0.0, -0.23 * h, 0.0),
+            position: Vec3::new(0.16 * w_thick * waist, knee_y, 0.0),
+            old_position: Vec3::new(0.16 * w_thick * waist, knee_y, 0.0),
+            radius: leg_rad * 0.9,
+            offset_from_parent: Vec3::new(0.0, -knee_y, 0.0),
             parent_name: "R_Hip".to_string(),
         },
         RagdollNode {
             name: "R_Foot".to_string(),
-            position: Vec3::new(0.16 * w_thick, 0.0, 0.0),
-            old_position: Vec3::new(0.16 * w_thick, 0.0, 0.0),
-            radius: 0.08 * w_thick,
-            offset_from_parent: Vec3::new(0.0, -0.22 * h, 0.0),
+            position: Vec3::new(0.16 * w_thick * waist, 0.0, 0.0),
+            old_position: Vec3::new(0.16 * w_thick * waist, 0.0, 0.0),
+            radius: leg_rad * 0.8,
+            offset_from_parent: Vec3::new(0.0, -knee_y, 0.0),
             parent_name: "R_Knee".to_string(),
         },
     ];
@@ -681,23 +713,23 @@ fn spawn_character_visuals(
 ) {
     let skin_mat = materials.add(StandardMaterial {
         base_color: settings.skin_color,
-        perceptual_roughness: 0.7,
+        perceptual_roughness: 0.65,
         ..default()
     });
 
     let shirt_mat = materials.add(StandardMaterial {
         base_color: if settings.gender == Gender::Male {
-            Color::srgb(0.1, 0.5, 0.8)
+            Color::srgb(0.15, 0.45, 0.75)
         } else {
-            Color::srgb(0.8, 0.15, 0.45)
+            Color::srgb(0.85, 0.25, 0.55)
         },
-        perceptual_roughness: 0.6,
+        perceptual_roughness: 0.55,
         ..default()
     });
 
     let pants_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.15, 0.18, 0.22),
-        perceptual_roughness: 0.8,
+        base_color: Color::srgb(0.12, 0.15, 0.22),
+        perceptual_roughness: 0.75,
         ..default()
     });
 
@@ -748,6 +780,7 @@ fn spawn_character_visuals(
                 },
                 XraySkinVisual,
                 CharacterVisualEntity,
+                CharacterModelPart,
             ))
             .id();
 
@@ -762,6 +795,7 @@ fn spawn_character_visuals(
             },
             XraySkeletonVisual,
             CharacterVisualEntity,
+            CharacterModelPart,
         ));
 
         // Hair and eyes are placed under the outer skin Head node
@@ -778,6 +812,7 @@ fn spawn_character_visuals(
                         mesh_radius * 0.85,
                     )),
                     CharacterVisualEntity,
+                    CharacterModelPart,
                 ))
                 .id();
             commands.entity(outer_node_entity).add_child(le);
@@ -792,6 +827,7 @@ fn spawn_character_visuals(
                         mesh_radius * 0.85,
                     )),
                     CharacterVisualEntity,
+                    CharacterModelPart,
                 ))
                 .id();
             commands.entity(outer_node_entity).add_child(re);
@@ -811,27 +847,71 @@ fn spawn_character_visuals(
                                 -mesh_radius * 0.1,
                             )),
                             CharacterVisualEntity,
+                            CharacterModelPart,
                         ))
                         .id();
                     commands.entity(outer_node_entity).add_child(cap);
 
-                    for i in 0..6 {
-                        let angle = (i as f32) * 0.6 - 1.5;
-                        let strand_mesh =
-                            meshes.add(Sphere::new(mesh_radius * 0.25).mesh().ico(3).unwrap());
-                        let strand = commands
+                    // Sideburns
+                    let sideburn_mesh = meshes.add(Cuboid::new(
+                        mesh_radius * 0.12,
+                        mesh_radius * 0.45,
+                        mesh_radius * 0.22,
+                    ));
+
+                    let sb_l = commands
+                        .spawn((
+                            Mesh3d(sideburn_mesh.clone()),
+                            MeshMaterial3d(hair_mat.clone()),
+                            Transform::from_translation(Vec3::new(
+                                -mesh_radius * 0.98,
+                                mesh_radius * 0.1,
+                                mesh_radius * 0.2,
+                            )),
+                            CharacterVisualEntity,
+                            CharacterModelPart,
+                        ))
+                        .id();
+                    commands.entity(outer_node_entity).add_child(sb_l);
+
+                    let sb_r = commands
+                        .spawn((
+                            Mesh3d(sideburn_mesh),
+                            MeshMaterial3d(hair_mat.clone()),
+                            Transform::from_translation(Vec3::new(
+                                mesh_radius * 0.98,
+                                mesh_radius * 0.1,
+                                mesh_radius * 0.2,
+                            )),
+                            CharacterVisualEntity,
+                            CharacterModelPart,
+                        ))
+                        .id();
+                    commands.entity(outer_node_entity).add_child(sb_r);
+
+                    // Front bangs/fringe
+                    let bang_mesh = meshes.add(Cuboid::new(
+                        mesh_radius * 0.35,
+                        mesh_radius * 0.2,
+                        mesh_radius * 0.22,
+                    ));
+                    for i in 0..3 {
+                        let offset_x = (i as f32 - 1.0) * mesh_radius * 0.32;
+                        let bang_id = commands
                             .spawn((
-                                Mesh3d(strand_mesh),
+                                Mesh3d(bang_mesh.clone()),
                                 MeshMaterial3d(hair_mat.clone()),
                                 Transform::from_translation(Vec3::new(
-                                    angle * mesh_radius * 0.4,
+                                    offset_x,
+                                    mesh_radius * 0.8,
                                     mesh_radius * 0.85,
-                                    mesh_radius * 0.45,
-                                )),
+                                ))
+                                .with_rotation(Quat::from_rotation_x(-0.25)),
                                 CharacterVisualEntity,
+                                CharacterModelPart,
                             ))
                             .id();
-                        commands.entity(outer_node_entity).add_child(strand);
+                        commands.entity(outer_node_entity).add_child(bang_id);
                     }
                 }
                 HairStyle::Ponytail => {
@@ -843,10 +923,11 @@ fn spawn_character_visuals(
                             MeshMaterial3d(hair_mat.clone()),
                             Transform::from_translation(Vec3::new(
                                 0.0,
-                                mesh_radius * 0.25,
-                                -mesh_radius * 0.1,
+                                mesh_radius * 0.33,
+                                -mesh_radius * 0.15,
                             )),
                             CharacterVisualEntity,
+                            CharacterModelPart,
                         ))
                         .id();
                     commands.entity(outer_node_entity).add_child(cap);
@@ -859,10 +940,11 @@ fn spawn_character_visuals(
                             MeshMaterial3d(hair_mat.clone()),
                             Transform::from_translation(Vec3::new(
                                 0.0,
-                                mesh_radius * 0.4,
-                                -mesh_radius * 1.1,
+                                mesh_radius * 0.48,
+                                -mesh_radius * 1.15,
                             )),
                             CharacterVisualEntity,
+                            CharacterModelPart,
                         ))
                         .id();
                     commands.entity(outer_node_entity).add_child(tail);
@@ -876,10 +958,11 @@ fn spawn_character_visuals(
                             MeshMaterial3d(hair_mat.clone()),
                             Transform::from_translation(Vec3::new(
                                 0.0,
-                                mesh_radius * 0.25,
-                                -mesh_radius * 0.1,
+                                mesh_radius * 0.33,
+                                -mesh_radius * 0.15,
                             )),
                             CharacterVisualEntity,
+                            CharacterModelPart,
                         ))
                         .id();
                     commands.entity(outer_node_entity).add_child(spike_parent);
@@ -904,6 +987,7 @@ fn spawn_character_visuals(
                                 ))
                                 .with_rotation(Quat::from_rotation_z(-angle)),
                                 CharacterVisualEntity,
+                                CharacterModelPart,
                             ))
                             .id();
                         commands.entity(spike_parent).add_child(spike);
@@ -918,10 +1002,11 @@ fn spawn_character_visuals(
                             MeshMaterial3d(hair_mat.clone()),
                             Transform::from_translation(Vec3::new(
                                 0.0,
-                                mesh_radius * 0.25,
-                                -mesh_radius * 0.1,
+                                mesh_radius * 0.33,
+                                -mesh_radius * 0.15,
                             )),
                             CharacterVisualEntity,
+                            CharacterModelPart,
                         ))
                         .id();
                     commands.entity(outer_node_entity).add_child(curly_parent);
@@ -936,10 +1021,11 @@ fn spawn_character_visuals(
                                     MeshMaterial3d(hair_mat.clone()),
                                     Transform::from_translation(Vec3::new(
                                         x as f32 * mesh_radius * 0.35,
-                                        mesh_radius * 0.9,
-                                        z as f32 * mesh_radius * 0.35,
+                                        mesh_radius * 0.95,
+                                        z as f32 * mesh_radius * 0.35 - mesh_radius * 0.05,
                                     )),
                                     CharacterVisualEntity,
+                                    CharacterModelPart,
                                 ))
                                 .id();
                             commands.entity(curly_parent).add_child(curl_ent);
@@ -980,6 +1066,7 @@ fn spawn_character_visuals(
             },
             XraySkinVisual,
             CharacterVisualEntity,
+            CharacterModelPart,
         ));
     }
 
@@ -1013,6 +1100,7 @@ fn spawn_character_visuals(
             },
             XraySkeletonVisual,
             CharacterVisualEntity,
+            CharacterModelPart,
         ));
     }
 }
@@ -1090,22 +1178,32 @@ fn ragdoll_physics_system(
     if !settings.is_ragdoll_active {
         let h = settings.height;
         let w_thick = settings.weight;
+        let sh_w = settings.shoulder_width;
+        let leg_len = settings.leg_length;
+        let waist = settings.waist_width;
+
+        let pelvis_y = h * 0.45 * (2.0 - leg_len);
+        let spine_y = pelvis_y + (h * 0.15);
+        let chest_y = pelvis_y + (h * 0.3);
+        let head_y = chest_y + (h * 0.18);
+        let knee_y = pelvis_y * 0.5;
+
         for node in physics.nodes.iter_mut() {
             let target_pos = match node.name.as_str() {
-                "Pelvis" => Vec3::new(0.0, h * 0.5, 0.0),
-                "Spine" => Vec3::new(0.0, h * 0.65, 0.0),
-                "Chest" => Vec3::new(0.0, h * 0.8, 0.0),
-                "Head" => Vec3::new(0.0, h * 0.98, 0.0),
-                "L_Shoulder" => Vec3::new(-0.25 * w_thick, h * 0.8, 0.0),
-                "L_Elbow" => Vec3::new(-0.5 * w_thick, h * 0.8, 0.0),
-                "R_Shoulder" => Vec3::new(0.25 * w_thick, h * 0.8, 0.0),
-                "R_Elbow" => Vec3::new(0.5 * w_thick, h * 0.8, 0.0),
-                "L_Hip" => Vec3::new(-0.16 * w_thick, h * 0.45, 0.0),
-                "L_Knee" => Vec3::new(-0.16 * w_thick, h * 0.22, 0.0),
-                "L_Foot" => Vec3::new(-0.16 * w_thick, 0.0, 0.0),
-                "R_Hip" => Vec3::new(0.16 * w_thick, h * 0.45, 0.0),
-                "R_Knee" => Vec3::new(0.16 * w_thick, h * 0.22, 0.0),
-                "R_Foot" => Vec3::new(0.16 * w_thick, 0.0, 0.0),
+                "Pelvis" => Vec3::new(0.0, pelvis_y, 0.0),
+                "Spine" => Vec3::new(0.0, spine_y, 0.0),
+                "Chest" => Vec3::new(0.0, chest_y, 0.0),
+                "Head" => Vec3::new(0.0, head_y, 0.0),
+                "L_Shoulder" => Vec3::new(-0.25 * w_thick * sh_w, chest_y, 0.0),
+                "L_Elbow" => Vec3::new(-0.5 * w_thick * sh_w, chest_y, 0.0),
+                "R_Shoulder" => Vec3::new(0.25 * w_thick * sh_w, chest_y, 0.0),
+                "R_Elbow" => Vec3::new(0.5 * w_thick * sh_w, chest_y, 0.0),
+                "L_Hip" => Vec3::new(-0.16 * w_thick * waist, pelvis_y, 0.0),
+                "L_Knee" => Vec3::new(-0.16 * w_thick * waist, knee_y, 0.0),
+                "L_Foot" => Vec3::new(-0.16 * w_thick * waist, 0.0, 0.0),
+                "R_Hip" => Vec3::new(0.16 * w_thick * waist, pelvis_y, 0.0),
+                "R_Knee" => Vec3::new(0.16 * w_thick * waist, knee_y, 0.0),
+                "R_Foot" => Vec3::new(0.16 * w_thick * waist, 0.0, 0.0),
                 _ => Vec3::ZERO,
             };
             node.position = target_pos;
@@ -1190,8 +1288,7 @@ fn character_designer_ui(
     mut physics: ResMut<RagdollPhysics>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    visual_query: Query<Entity, With<CharacterVisualEntity>>,
-    bone_visual_query: Query<Entity, With<BoneVisual>>,
+    model_part_query: Query<Entity, With<CharacterModelPart>>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
@@ -1222,8 +1319,7 @@ fn character_designer_ui(
                         &mut materials,
                         &settings,
                         &mut physics,
-                        &visual_query,
-                        &bone_visual_query,
+                        &model_part_query,
                     );
                 }
                 if ui
@@ -1237,8 +1333,7 @@ fn character_designer_ui(
                         &mut materials,
                         &settings,
                         &mut physics,
-                        &visual_query,
-                        &bone_visual_query,
+                        &model_part_query,
                     );
                 }
             });
@@ -1253,8 +1348,7 @@ fn character_designer_ui(
                     &mut materials,
                     &settings,
                     &mut physics,
-                    &visual_query,
-                    &bone_visual_query,
+                    &model_part_query,
                 );
             }
 
@@ -1267,8 +1361,7 @@ fn character_designer_ui(
                     &mut materials,
                     &settings,
                     &mut physics,
-                    &visual_query,
-                    &bone_visual_query,
+                    &model_part_query,
                 );
             }
 
@@ -1281,10 +1374,75 @@ fn character_designer_ui(
                     &mut materials,
                     &settings,
                     &mut physics,
-                    &visual_query,
-                    &bone_visual_query,
+                    &model_part_query,
                 );
             }
+
+            ui.add_space(5.0);
+            egui::CollapsingHeader::new("🧬 Realistic Proportions")
+                .default_open(true)
+                .show(ui, |ui| {
+                    let prev_muscle = settings.muscle_mass;
+                    ui.add(
+                        egui::Slider::new(&mut settings.muscle_mass, 0.0..=1.5).text("Muscle Mass"),
+                    );
+                    if settings.muscle_mass != prev_muscle {
+                        trigger_rebuild(
+                            &mut commands,
+                            &mut meshes,
+                            &mut materials,
+                            &settings,
+                            &mut physics,
+                            &model_part_query,
+                        );
+                    }
+
+                    let prev_sh = settings.shoulder_width;
+                    ui.add(
+                        egui::Slider::new(&mut settings.shoulder_width, 0.7..=1.4)
+                            .text("Shoulder Width"),
+                    );
+                    if settings.shoulder_width != prev_sh {
+                        trigger_rebuild(
+                            &mut commands,
+                            &mut meshes,
+                            &mut materials,
+                            &settings,
+                            &mut physics,
+                            &model_part_query,
+                        );
+                    }
+
+                    let prev_leg = settings.leg_length;
+                    ui.add(
+                        egui::Slider::new(&mut settings.leg_length, 0.7..=1.4).text("Leg Length"),
+                    );
+                    if settings.leg_length != prev_leg {
+                        trigger_rebuild(
+                            &mut commands,
+                            &mut meshes,
+                            &mut materials,
+                            &settings,
+                            &mut physics,
+                            &model_part_query,
+                        );
+                    }
+
+                    let prev_waist = settings.waist_width;
+                    ui.add(
+                        egui::Slider::new(&mut settings.waist_width, 0.7..=1.4).text("Waist Width"),
+                    );
+                    if settings.waist_width != prev_waist {
+                        trigger_rebuild(
+                            &mut commands,
+                            &mut meshes,
+                            &mut materials,
+                            &settings,
+                            &mut physics,
+                            &model_part_query,
+                        );
+                    }
+                });
 
             ui.add_space(8.0);
             ui.heading("Aesthetics");
@@ -1316,8 +1474,7 @@ fn character_designer_ui(
                     &mut materials,
                     &settings,
                     &mut physics,
-                    &visual_query,
-                    &bone_visual_query,
+                    &model_part_query,
                 );
             }
 
@@ -1341,8 +1498,7 @@ fn character_designer_ui(
                         &mut materials,
                         &settings,
                         &mut physics,
-                        &visual_query,
-                        &bone_visual_query,
+                        &model_part_query,
                     );
                 }
                 ui.label(format!("RGB: {}, {}, {}", c[0], c[1], c[2]));
@@ -1367,8 +1523,7 @@ fn character_designer_ui(
                         &mut materials,
                         &settings,
                         &mut physics,
-                        &visual_query,
-                        &bone_visual_query,
+                        &model_part_query,
                     );
                 }
                 ui.label("Pick skin tone color");
@@ -1395,8 +1550,7 @@ fn character_designer_ui(
                         &mut materials,
                         &settings,
                         &mut physics,
-                        &visual_query,
-                        &bone_visual_query,
+                        &model_part_query,
                     );
                 }
             }
@@ -1451,13 +1605,9 @@ fn trigger_rebuild(
     materials: &mut ResMut<Assets<StandardMaterial>>,
     settings: &CharacterSettings,
     physics: &mut RagdollPhysics,
-    visual_query: &Query<Entity, With<CharacterVisualEntity>>,
-    bone_visual_query: &Query<Entity, With<BoneVisual>>,
+    model_part_query: &Query<Entity, With<CharacterModelPart>>,
 ) {
-    for entity in visual_query.iter() {
-        commands.entity(entity).despawn();
-    }
-    for entity in bone_visual_query.iter() {
+    for entity in model_part_query.iter() {
         commands.entity(entity).despawn();
     }
 

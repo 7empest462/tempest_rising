@@ -44,6 +44,7 @@ impl Plugin for PlayModePlugin {
             .add_systems(
                 Update,
                 (
+                    sync_mansion_global_bounds_system,
                     player_movement_and_ragdoll_system,
                     axe_swing_system,
                     play_visual_sync_system,
@@ -1042,120 +1043,129 @@ fn setup_play_mode(
     let h_scale = char_settings.height;
     let w_thick = char_settings.weight;
     let head_scale = char_settings.head_scale;
+    let sh_w = char_settings.shoulder_width;
+    let leg_len = char_settings.leg_length;
+    let waist = char_settings.waist_width;
+
+    let pelvis_y = h_scale * 0.45 * (2.0 - leg_len);
+    let spine_y = pelvis_y + (h_scale * 0.15);
+    let chest_y = pelvis_y + (h_scale * 0.3);
+    let head_y = chest_y + (h_scale * 0.18);
+    let knee_y = pelvis_y * 0.5;
 
     // Build Verlet node list similar to character designer structure
     let nodes = vec![
         PlayVerletNode {
             name: "Pelvis".to_string(),
-            position: spawn_pos + Vec3::new(0.0, h_scale * 0.5, 0.0),
-            old_position: spawn_pos + Vec3::new(0.0, h_scale * 0.5, 0.0),
+            position: spawn_pos + Vec3::new(0.0, pelvis_y, 0.0),
+            old_position: spawn_pos + Vec3::new(0.0, pelvis_y, 0.0),
             radius: 0.15 * w_thick,
-            start_local: Vec3::new(0.0, h_scale * 0.5, 0.0),
+            start_local: Vec3::new(0.0, pelvis_y, 0.0),
         },
         PlayVerletNode {
             name: "Spine".to_string(),
-            position: spawn_pos + Vec3::new(0.0, h_scale * 0.65, 0.0),
-            old_position: spawn_pos + Vec3::new(0.0, h_scale * 0.65, 0.0),
+            position: spawn_pos + Vec3::new(0.0, spine_y, 0.0),
+            old_position: spawn_pos + Vec3::new(0.0, spine_y, 0.0),
             radius: 0.16 * w_thick,
-            start_local: Vec3::new(0.0, h_scale * 0.65, 0.0),
+            start_local: Vec3::new(0.0, spine_y, 0.0),
         },
         PlayVerletNode {
             name: "Chest".to_string(),
-            position: spawn_pos + Vec3::new(0.0, h_scale * 0.8, 0.0),
-            old_position: spawn_pos + Vec3::new(0.0, h_scale * 0.8, 0.0),
+            position: spawn_pos + Vec3::new(0.0, chest_y, 0.0),
+            old_position: spawn_pos + Vec3::new(0.0, chest_y, 0.0),
             radius: 0.18 * w_thick,
-            start_local: Vec3::new(0.0, h_scale * 0.8, 0.0),
+            start_local: Vec3::new(0.0, chest_y, 0.0),
         },
         PlayVerletNode {
             name: "Head".to_string(),
-            position: spawn_pos + Vec3::new(0.0, h_scale * 0.98, 0.0),
-            old_position: spawn_pos + Vec3::new(0.0, h_scale * 0.98, 0.0),
+            position: spawn_pos + Vec3::new(0.0, head_y, 0.0),
+            old_position: spawn_pos + Vec3::new(0.0, head_y, 0.0),
             radius: 0.14 * head_scale,
-            start_local: Vec3::new(0.0, h_scale * 0.98, 0.0),
+            start_local: Vec3::new(0.0, head_y, 0.0),
         },
         PlayVerletNode {
             name: "L_Shoulder".to_string(),
-            position: spawn_pos + Vec3::new(-0.25 * w_thick, h_scale * 0.8, 0.0),
-            old_position: spawn_pos + Vec3::new(-0.25 * w_thick, h_scale * 0.8, 0.0),
+            position: spawn_pos + Vec3::new(-0.25 * w_thick * sh_w, chest_y, 0.0),
+            old_position: spawn_pos + Vec3::new(-0.25 * w_thick * sh_w, chest_y, 0.0),
             radius: 0.08 * w_thick,
-            start_local: Vec3::new(-0.25 * w_thick, h_scale * 0.8, 0.0),
+            start_local: Vec3::new(-0.25 * w_thick * sh_w, chest_y, 0.0),
         },
         PlayVerletNode {
             name: "L_Elbow".to_string(),
-            position: spawn_pos + Vec3::new(-0.5 * w_thick, h_scale * 0.8, 0.0),
-            old_position: spawn_pos + Vec3::new(-0.5 * w_thick, h_scale * 0.8, 0.0),
+            position: spawn_pos + Vec3::new(-0.5 * w_thick * sh_w, chest_y, 0.0),
+            old_position: spawn_pos + Vec3::new(-0.5 * w_thick * sh_w, chest_y, 0.0),
             radius: 0.07 * w_thick,
-            start_local: Vec3::new(-0.5 * w_thick, h_scale * 0.8, 0.0),
+            start_local: Vec3::new(-0.5 * w_thick * sh_w, chest_y, 0.0),
         },
         PlayVerletNode {
             name: "R_Shoulder".to_string(),
-            position: spawn_pos + Vec3::new(0.25 * w_thick, h_scale * 0.8, 0.0),
-            old_position: spawn_pos + Vec3::new(0.25 * w_thick, h_scale * 0.8, 0.0),
+            position: spawn_pos + Vec3::new(0.25 * w_thick * sh_w, chest_y, 0.0),
+            old_position: spawn_pos + Vec3::new(0.25 * w_thick * sh_w, chest_y, 0.0),
             radius: 0.08 * w_thick,
-            start_local: Vec3::new(0.25 * w_thick, h_scale * 0.8, 0.0),
+            start_local: Vec3::new(0.25 * w_thick * sh_w, chest_y, 0.0),
         },
         PlayVerletNode {
             name: "R_Elbow".to_string(),
-            position: spawn_pos + Vec3::new(0.5 * w_thick, h_scale * 0.8, 0.0),
-            old_position: spawn_pos + Vec3::new(0.5 * w_thick, h_scale * 0.8, 0.0),
+            position: spawn_pos + Vec3::new(0.5 * w_thick * sh_w, chest_y, 0.0),
+            old_position: spawn_pos + Vec3::new(0.5 * w_thick * sh_w, chest_y, 0.0),
             radius: 0.07 * w_thick,
-            start_local: Vec3::new(0.5 * w_thick, h_scale * 0.8, 0.0),
+            start_local: Vec3::new(0.5 * w_thick * sh_w, chest_y, 0.0),
         },
         PlayVerletNode {
             name: "L_Hip".to_string(),
-            position: spawn_pos + Vec3::new(-0.16 * w_thick, h_scale * 0.45, 0.0),
-            old_position: spawn_pos + Vec3::new(-0.16 * w_thick, h_scale * 0.45, 0.0),
+            position: spawn_pos + Vec3::new(-0.16 * w_thick * waist, pelvis_y, 0.0),
+            old_position: spawn_pos + Vec3::new(-0.16 * w_thick * waist, pelvis_y, 0.0),
             radius: 0.1 * w_thick,
-            start_local: Vec3::new(-0.16 * w_thick, h_scale * 0.45, 0.0),
+            start_local: Vec3::new(-0.16 * w_thick * waist, pelvis_y, 0.0),
         },
         PlayVerletNode {
             name: "L_Knee".to_string(),
-            position: spawn_pos + Vec3::new(-0.16 * w_thick, h_scale * 0.22, 0.0),
-            old_position: spawn_pos + Vec3::new(-0.16 * w_thick, h_scale * 0.22, 0.0),
+            position: spawn_pos + Vec3::new(-0.16 * w_thick * waist, knee_y, 0.0),
+            old_position: spawn_pos + Vec3::new(-0.16 * w_thick * waist, knee_y, 0.0),
             radius: 0.09 * w_thick,
-            start_local: Vec3::new(-0.16 * w_thick, h_scale * 0.22, 0.0),
+            start_local: Vec3::new(-0.16 * w_thick * waist, knee_y, 0.0),
         },
         PlayVerletNode {
             name: "L_Foot".to_string(),
-            position: spawn_pos + Vec3::new(-0.16 * w_thick, 0.0, 0.0),
-            old_position: spawn_pos + Vec3::new(-0.16 * w_thick, 0.0, 0.0),
+            position: spawn_pos + Vec3::new(-0.16 * w_thick * waist, 0.0, 0.0),
+            old_position: spawn_pos + Vec3::new(-0.16 * w_thick * waist, 0.0, 0.0),
             radius: 0.08 * w_thick,
-            start_local: Vec3::new(-0.16 * w_thick, 0.0, 0.0),
+            start_local: Vec3::new(-0.16 * w_thick * waist, 0.0, 0.0),
         },
         PlayVerletNode {
             name: "R_Hip".to_string(),
-            position: spawn_pos + Vec3::new(0.16 * w_thick, h_scale * 0.45, 0.0),
-            old_position: spawn_pos + Vec3::new(0.16 * w_thick, h_scale * 0.45, 0.0),
+            position: spawn_pos + Vec3::new(0.16 * w_thick * waist, pelvis_y, 0.0),
+            old_position: spawn_pos + Vec3::new(0.16 * w_thick * waist, pelvis_y, 0.0),
             radius: 0.1 * w_thick,
-            start_local: Vec3::new(0.16 * w_thick, h_scale * 0.45, 0.0),
+            start_local: Vec3::new(0.16 * w_thick * waist, pelvis_y, 0.0),
         },
         PlayVerletNode {
             name: "R_Knee".to_string(),
-            position: spawn_pos + Vec3::new(0.16 * w_thick, h_scale * 0.22, 0.0),
-            old_position: spawn_pos + Vec3::new(0.16 * w_thick, h_scale * 0.22, 0.0),
+            position: spawn_pos + Vec3::new(0.16 * w_thick * waist, knee_y, 0.0),
+            old_position: spawn_pos + Vec3::new(0.16 * w_thick * waist, knee_y, 0.0),
             radius: 0.09 * w_thick,
-            start_local: Vec3::new(0.16 * w_thick, h_scale * 0.22, 0.0),
+            start_local: Vec3::new(0.16 * w_thick * waist, knee_y, 0.0),
         },
         PlayVerletNode {
             name: "R_Foot".to_string(),
-            position: spawn_pos + Vec3::new(0.16 * w_thick, 0.0, 0.0),
-            old_position: spawn_pos + Vec3::new(0.16 * w_thick, 0.0, 0.0),
+            position: spawn_pos + Vec3::new(0.16 * w_thick * waist, 0.0, 0.0),
+            old_position: spawn_pos + Vec3::new(0.16 * w_thick * waist, 0.0, 0.0),
             radius: 0.08 * w_thick,
-            start_local: Vec3::new(0.16 * w_thick, 0.0, 0.0),
+            start_local: Vec3::new(0.16 * w_thick * waist, 0.0, 0.0),
         },
         PlayVerletNode {
             name: "L_Hand".to_string(),
-            position: spawn_pos + Vec3::new(-0.7 * w_thick, h_scale * 0.8, 0.0),
-            old_position: spawn_pos + Vec3::new(-0.7 * w_thick, h_scale * 0.8, 0.0),
+            position: spawn_pos + Vec3::new(-0.7 * w_thick, chest_y, 0.0),
+            old_position: spawn_pos + Vec3::new(-0.7 * w_thick, chest_y, 0.0),
             radius: 0.06 * w_thick,
-            start_local: Vec3::new(-0.7 * w_thick, h_scale * 0.8, 0.0),
+            start_local: Vec3::new(-0.7 * w_thick, chest_y, 0.0),
         },
         PlayVerletNode {
             name: "R_Hand".to_string(),
-            position: spawn_pos + Vec3::new(0.7 * w_thick, h_scale * 0.8, 0.0),
-            old_position: spawn_pos + Vec3::new(0.7 * w_thick, h_scale * 0.8, 0.0),
+            position: spawn_pos + Vec3::new(0.7 * w_thick, chest_y, 0.0),
+            old_position: spawn_pos + Vec3::new(0.7 * w_thick, chest_y, 0.0),
             radius: 0.06 * w_thick,
-            start_local: Vec3::new(0.7 * w_thick, h_scale * 0.8, 0.0),
+            start_local: Vec3::new(0.7 * w_thick, chest_y, 0.0),
         },
     ];
 
@@ -1355,25 +1365,44 @@ fn setup_play_mode(
                             MeshMaterial3d(hair_mat.clone()),
                             Transform::from_translation(Vec3::new(
                                 0.0,
-                                mesh_radius * 0.25,
-                                -mesh_radius * 0.1,
+                                mesh_radius * 0.33,
+                                -mesh_radius * 0.15,
                             )),
                             PlayModeEntity,
                         ))
                         .id();
                     commands.entity(node_id).add_child(cap);
+
+                    for i in 0..6 {
+                        let angle = (i as f32) * 0.6 - 1.5;
+                        let strand_mesh =
+                            meshes.add(Sphere::new(mesh_radius * 0.25).mesh().ico(3).unwrap());
+                        let strand = commands
+                            .spawn((
+                                Mesh3d(strand_mesh),
+                                MeshMaterial3d(hair_mat.clone()),
+                                Transform::from_translation(Vec3::new(
+                                    angle * mesh_radius * 0.4,
+                                    mesh_radius * 0.95,
+                                    mesh_radius * 0.3,
+                                )),
+                                PlayModeEntity,
+                            ))
+                            .id();
+                        commands.entity(node_id).add_child(strand);
+                    }
                 }
                 HairStyle::Ponytail => {
                     let cap_mesh =
-                        meshes.add(Sphere::new(mesh_radius * 1.03).mesh().ico(4).unwrap());
+                        meshes.add(Sphere::new(mesh_radius * 1.02).mesh().ico(4).unwrap());
                     let cap = commands
                         .spawn((
                             Mesh3d(cap_mesh),
                             MeshMaterial3d(hair_mat.clone()),
                             Transform::from_translation(Vec3::new(
                                 0.0,
-                                mesh_radius * 0.25,
-                                -mesh_radius * 0.1,
+                                mesh_radius * 0.33,
+                                -mesh_radius * 0.15,
                             )),
                             PlayModeEntity,
                         ))
@@ -1381,14 +1410,14 @@ fn setup_play_mode(
                     commands.entity(node_id).add_child(cap);
 
                     let tail_mesh =
-                        meshes.add(Sphere::new(mesh_radius * 0.35).mesh().ico(3).unwrap());
+                        meshes.add(Sphere::new(mesh_radius * 0.4).mesh().ico(3).unwrap());
                     let tail = commands
                         .spawn((
                             Mesh3d(tail_mesh),
                             MeshMaterial3d(hair_mat.clone()),
                             Transform::from_translation(Vec3::new(
                                 0.0,
-                                -mesh_radius * 0.25,
+                                mesh_radius * 0.48,
                                 -mesh_radius * 1.15,
                             )),
                             PlayModeEntity,
@@ -1403,82 +1432,76 @@ fn setup_play_mode(
                         .spawn((
                             Mesh3d(cap_mesh),
                             MeshMaterial3d(hair_mat.clone()),
-                            Transform::from_translation(Vec3::new(0.0, mesh_radius * 0.22, 0.0)),
-                            PlayModeEntity,
-                        ))
-                        .id();
-                    commands.entity(node_id).add_child(cap);
-
-                    // Create multiple layers of spikes for a proper spiky look
-                    for layer in 0..3 {
-                        let layer_radius = mesh_radius * (0.95 - layer as f32 * 0.22);
-                        let spike_count = if layer == 0 { 14 } else { 9 - layer * 2 };
-
-                        for i in 0..spike_count {
-                            let angle = (i as f32 / spike_count as f32) * std::f32::consts::TAU
-                                + (layer as f32 * 0.8);
-                            let radial_offset = if layer == 0 {
-                                0.0
-                            } else {
-                                (i as f32 * 0.4).sin() * 0.15
-                            };
-
-                            let x = angle.cos() * layer_radius + radial_offset;
-                            let z = angle.sin() * layer_radius;
-
-                            // Lower spikes and vary height for natural look
-                            let y_offset = mesh_radius * (0.75 + layer as f32 * 0.35);
-                            let height_scale = 1.6 + (i as f32 * 0.7).sin() * 0.6;
-
-                            let spike = commands
-                                .spawn((
-                                    Mesh3d(meshes.add(
-                                        Sphere::new(mesh_radius * 0.19).mesh().ico(3).unwrap(),
-                                    )),
-                                    MeshMaterial3d(hair_mat.clone()),
-                                    Transform::from_translation(Vec3::new(x, y_offset, z))
-                                        .with_scale(Vec3::new(0.75, height_scale, 0.75)),
-                                    PlayModeEntity,
-                                ))
-                                .id();
-
-                            commands.entity(node_id).add_child(spike);
-                        }
-                    }
-                }
-                HairStyle::Curly => {
-                    let cap_mesh =
-                        meshes.add(Sphere::new(mesh_radius * 1.03).mesh().ico(4).unwrap());
-                    let cap = commands
-                        .spawn((
-                            Mesh3d(cap_mesh),
-                            MeshMaterial3d(hair_mat.clone()),
                             Transform::from_translation(Vec3::new(
                                 0.0,
-                                mesh_radius * 0.25,
-                                -mesh_radius * 0.1,
+                                mesh_radius * 0.33,
+                                -mesh_radius * 0.15,
                             )),
                             PlayModeEntity,
                         ))
                         .id();
                     commands.entity(node_id).add_child(cap);
 
-                    for curl_idx in 0..12 {
-                        let cx = (curl_idx as f32).sin() * mesh_radius * 0.9;
-                        let cy = (curl_idx as f32).cos() * mesh_radius * 0.5 + mesh_radius * 0.4;
-                        let cz = -mesh_radius * 0.5;
-                        let curl =
-                            commands
+                    for i in 0..5 {
+                        let angle = (i as f32) * 0.6 - 1.2;
+                        let cone_mesh = meshes.add(
+                            Cone {
+                                radius: mesh_radius * 0.15,
+                                height: mesh_radius * 0.5,
+                            }
+                            .mesh(),
+                        );
+                        let spike = commands
+                            .spawn((
+                                Mesh3d(cone_mesh),
+                                MeshMaterial3d(hair_mat.clone()),
+                                Transform::from_translation(Vec3::new(
+                                    angle * mesh_radius * 0.5,
+                                    mesh_radius * 0.9,
+                                    mesh_radius * 0.2,
+                                ))
+                                .with_rotation(Quat::from_rotation_z(-angle)),
+                                PlayModeEntity,
+                            ))
+                            .id();
+                        commands.entity(cap).add_child(spike);
+                    }
+                }
+                HairStyle::Curly => {
+                    let cap_mesh =
+                        meshes.add(Sphere::new(mesh_radius * 1.02).mesh().ico(4).unwrap());
+                    let cap = commands
+                        .spawn((
+                            Mesh3d(cap_mesh),
+                            MeshMaterial3d(hair_mat.clone()),
+                            Transform::from_translation(Vec3::new(
+                                0.0,
+                                mesh_radius * 0.33,
+                                -mesh_radius * 0.15,
+                            )),
+                            PlayModeEntity,
+                        ))
+                        .id();
+                    commands.entity(node_id).add_child(cap);
+
+                    for x in -2..=2 {
+                        for z in -2..=1 {
+                            let curl =
+                                meshes.add(Sphere::new(mesh_radius * 0.22).mesh().ico(3).unwrap());
+                            let curl_ent = commands
                                 .spawn((
-                                    Mesh3d(meshes.add(
-                                        Sphere::new(mesh_radius * 0.28).mesh().ico(3).unwrap(),
-                                    )),
+                                    Mesh3d(curl),
                                     MeshMaterial3d(hair_mat.clone()),
-                                    Transform::from_translation(Vec3::new(cx, cy, cz)),
+                                    Transform::from_translation(Vec3::new(
+                                        x as f32 * mesh_radius * 0.35,
+                                        mesh_radius * 0.95,
+                                        z as f32 * mesh_radius * 0.35 - mesh_radius * 0.05,
+                                    )),
                                     PlayModeEntity,
                                 ))
                                 .id();
-                        commands.entity(node_id).add_child(curl);
+                            commands.entity(cap).add_child(curl_ent);
+                        }
                     }
                 }
             }
@@ -1766,18 +1789,47 @@ fn spawn_swim_wake(
     }
 }
 
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+
+static MANSION_COLS: AtomicU32 = AtomicU32::new(8);
+static MANSION_ROWS: AtomicU32 = AtomicU32::new(4);
+static MANSION_CELL_SIZE: AtomicU32 = AtomicU32::new(1084227584); // 5.0f32.to_bits()
+static HOUSE_POS_X: AtomicU32 = AtomicU32::new(0);
+static HOUSE_POS_Z: AtomicU32 = AtomicU32::new(0);
+static HOUSE_PLACED: AtomicBool = AtomicBool::new(false);
+
 /// Returns (floor_y, ceiling_y) for the given position.
 /// Used for grounding the player/creatures AND preventing them from passing through ceilings.
 fn get_floor_and_ceiling(pos: Vec3, terrain_y: f32) -> (f32, f32) {
-    // Mansion grid bounds: X inside -20.0..20.0, Z inside -10.0..10.0
-    let inside_mansion = pos.x.abs() < 20.0 && pos.z.abs() < 10.0;
-    if inside_mansion {
-        if pos.y > 5.0 {
-            // On the second floor (floor 2)
-            (5.0, 8.5) // floor at 5.0, ceiling at 8.5 (5.0 + 3.5)
+    if HOUSE_PLACED.load(Ordering::Relaxed) {
+        let cols = MANSION_COLS.load(Ordering::Relaxed);
+        let rows = MANSION_ROWS.load(Ordering::Relaxed);
+        let cell_size = f32::from_bits(MANSION_CELL_SIZE.load(Ordering::Relaxed));
+        let house_pos_x = f32::from_bits(HOUSE_POS_X.load(Ordering::Relaxed));
+        let house_pos_z = f32::from_bits(HOUSE_POS_Z.load(Ordering::Relaxed));
+
+        let half_w = (cols as f32 * cell_size) * 0.5;
+        let half_d = (rows as f32 * cell_size) * 0.5;
+        let inside_mansion =
+            (pos.x - house_pos_x).abs() < half_w && (pos.z - house_pos_z).abs() < half_d;
+        if inside_mansion {
+            let staircase_x = house_pos_x - half_w + cell_size * 3.5;
+            let near_staircase = (pos.x - staircase_x).abs() < (cell_size * 0.6);
+            if near_staircase && pos.y > 1.4 && pos.y < 5.1 {
+                (pos.y, f32::MAX)
+            } else if pos.y > 3.25 {
+                // On the second floor (floor 2)
+                (5.0, 8.5) // floor at 5.0, ceiling at 8.5 (5.0 + 3.5)
+            } else {
+                // On the ground floor (floor 1)
+                (1.5, 5.0) // floor at 1.5, ceiling at 5.0
+            }
+        } else if pos.y < -75.0 {
+            (-100.0, -50.0) // Sub-basement
+        } else if pos.y < -30.0 {
+            (-50.0, f32::MAX) // Basement (no ceiling constraint going up — teleporter handles it)
         } else {
-            // On the ground floor (floor 1)
-            (1.5, 5.0) // floor at 1.5, ceiling at 5.0
+            (terrain_y, f32::MAX) // Outdoors — no ceiling
         }
     } else if pos.y < -75.0 {
         (-100.0, -50.0) // Sub-basement
@@ -1799,6 +1851,29 @@ struct PlayerMovementParams<'w, 's> {
     meshes: ResMut<'w, Assets<Mesh>>,
     materials: ResMut<'w, Assets<StandardMaterial>>,
     asset_server: Res<'w, AssetServer>,
+    player_config_query: Query<'w, 's, &'static bevy_tnua::prelude::TnuaConfig<ControlScheme>>,
+    control_configs: ResMut<'w, Assets<ControlSchemeConfig>>,
+}
+
+fn sync_mansion_global_bounds_system(
+    map: Res<TempestMap>,
+    mansion_settings: Res<crate::play_mode::house::MansionSettings>,
+) {
+    let mut house_pos = Vec3::new(0.0, 1.5, 0.0);
+    let mut house_placed = false;
+    for p in map.prefabs.iter() {
+        if p.prefab_type == "house" {
+            house_pos = Vec3::from_array(p.position);
+            house_placed = true;
+            break;
+        }
+    }
+    HOUSE_PLACED.store(house_placed, Ordering::Relaxed);
+    MANSION_COLS.store(mansion_settings.cols, Ordering::Relaxed);
+    MANSION_ROWS.store(mansion_settings.rows, Ordering::Relaxed);
+    MANSION_CELL_SIZE.store(mansion_settings.cell_size.to_bits(), Ordering::Relaxed);
+    HOUSE_POS_X.store(house_pos.x.to_bits(), Ordering::Relaxed);
+    HOUSE_POS_Z.store(house_pos.z.to_bits(), Ordering::Relaxed);
 }
 
 // System governing movements, slope locking, mouse-look, swimming, and physics-based Verlet cliff tumbling
@@ -1822,6 +1897,7 @@ fn player_movement_and_ragdoll_system(
     mut tnua_query: Query<&mut bevy_tnua::prelude::TnuaController<ControlScheme>>,
     mut velocity_query: Query<&mut avian3d::prelude::LinearVelocity>,
     mut physics_pos_query: Query<&mut avian3d::prelude::Position>,
+    settings: Res<CharacterSettings>,
 ) {
     let Ok((_player_entity, mut player, mut player_transform)) = player_query.single_mut() else {
         return;
@@ -2010,17 +2086,24 @@ fn player_movement_and_ragdoll_system(
             let (ground_y, _) = get_floor_and_ceiling(player_transform.translation, terrain_y);
             let water_depth = (water_settings.height - ground_y).max(0.0);
 
-            let mut speed = 2.0 * player.height;
+            let mut speed = 1.25 * player.height;
             if keyboard_input.pressed(KeyCode::ShiftLeft)
                 || keyboard_input.pressed(KeyCode::ShiftRight)
             {
-                speed *= 1.7; // Running speed
+                speed *= 2.244; // Running speed (keeps overall sprint speed at 2.8 * height)
             }
 
             // Wade speed reduction in shallow water
             if water_depth > 0.0 {
                 let wade_factor = (1.0 - (water_depth / 1.0) * 0.45).max(0.55);
                 speed *= wade_factor;
+            }
+
+            // Update Tnua walk basis speed dynamically
+            if let Ok(tnua_config) = params.player_config_query.get(_player_entity)
+                && let Some(mut config) = params.control_configs.get_mut(&tnua_config.0)
+            {
+                config.basis.speed = speed;
             }
 
             let horizontal_vel = if let Ok(vel) = velocity_query.get(_player_entity) {
@@ -2117,7 +2200,12 @@ fn player_movement_and_ragdoll_system(
 
             // Visual height clamp: keep visual position from sinking below the ground/floor visually, without teleporting physics body (which causes rapid up-down shakiness)
             let ground_y = get_effective_floor_height(player.position, terrain_y);
-            player.position.y = target_y.max(ground_y);
+            let target_visual_y = target_y.max(ground_y);
+            if !player.is_walking && (target_visual_y - ground_y).abs() < 0.08 {
+                player.position.y = ground_y;
+            } else {
+                player.position.y = target_visual_y;
+            }
         } else {
             let mut move_dir = Vec3::ZERO;
 
@@ -2159,7 +2247,7 @@ fn player_movement_and_ragdoll_system(
             } else if p_state == PlayerState::Flying {
                 8.0 * player.height
             } else {
-                2.0 * player.height
+                1.25 * player.height
             };
             if keyboard_input.pressed(KeyCode::ShiftLeft)
                 || keyboard_input.pressed(KeyCode::ShiftRight)
@@ -2167,7 +2255,7 @@ fn player_movement_and_ragdoll_system(
                 if p_state == PlayerState::Flying {
                     speed *= 2.5;
                 } else {
-                    speed *= 1.7;
+                    speed *= 2.244;
                 }
             }
 
@@ -2346,6 +2434,7 @@ fn player_movement_and_ragdoll_system(
         let p_pos = player.position;
         let p_walk_timer = player.walk_timer;
         let p_is_walking = player.is_walking;
+        let p_active_weapon = player.active_weapon;
 
         let cos_yaw = p_rotation_yaw.cos();
         let sin_yaw = p_rotation_yaw.sin();
@@ -2462,10 +2551,20 @@ fn player_movement_and_ragdoll_system(
             }
         } else {
             // STANDING / UPRIGHT WALKING ALIGNMENT
-            nodes[0].position = p_pos + Vec3::Y * p_height * 0.5; // Pelvis
-            nodes[1].position = p_pos + Vec3::Y * p_height * 0.65; // Spine
-            nodes[2].position = p_pos + Vec3::Y * p_height * 0.8; // Chest
-            nodes[3].position = p_pos + Vec3::Y * p_height * 0.98; // Head
+            let sh_w = settings.shoulder_width;
+            let leg_len = settings.leg_length;
+            let waist = settings.waist_width;
+
+            let pelvis_y = p_height * 0.45 * (2.0 - leg_len);
+            let spine_y = pelvis_y + (p_height * 0.15);
+            let chest_y = pelvis_y + (p_height * 0.3);
+            let head_y = chest_y + (p_height * 0.18);
+            let knee_y = pelvis_y * 0.5;
+
+            nodes[0].position = p_pos + Vec3::Y * pelvis_y; // Pelvis
+            nodes[1].position = p_pos + Vec3::Y * spine_y; // Spine
+            nodes[2].position = p_pos + Vec3::Y * chest_y; // Chest
+            nodes[3].position = p_pos + Vec3::Y * head_y; // Head
 
             let is_first_person = camera.view_mode == ViewMode::FirstPerson;
 
@@ -2476,86 +2575,178 @@ fn player_movement_and_ragdoll_system(
                     arm_swing = 0.0;
                 }
 
-                // Left shoulder & hand held out forward-left
-                nodes[4].position = p_pos + Vec3::Y * p_height * 0.85 - right * 0.25 * p_weight; // L_Shoulder
-                nodes[14].position = nodes[4].position - right * 0.1 * p_weight
-                    + forward * (0.4 + arm_swing)
-                    - Vec3::Y * 0.15; // L_Hand
-                nodes[5].position = nodes[4].position
-                    + (nodes[14].position - nodes[4].position) * 0.5
-                    - right * 0.08
-                    - Vec3::Y * 0.05; // L_Elbow
+                // Left shoulder & Right shoulder locked
+                nodes[4].position = p_pos + Vec3::Y * chest_y - right * 0.25 * p_weight * sh_w; // L_Shoulder
+                nodes[6].position = p_pos + Vec3::Y * chest_y + right * 0.25 * p_weight * sh_w; // R_Shoulder
 
-                // Right shoulder & hand held out forward-right holding weapon
                 let cam_forward = cam_transform.forward().as_vec3();
                 let cam_right = cam_transform.right().as_vec3();
                 let cam_up = cam_transform.up().as_vec3();
 
-                // Bring the hand higher and more centered so the gun is clearly visible in first person!
-                let mut r_hand_pos =
-                    cam_transform.translation + cam_forward * 0.55 + cam_right * 0.2
+                let is_rifle = p_active_weapon == ActiveWeapon::Rifle
+                    || p_active_weapon == ActiveWeapon::Sniper;
+                let is_pistol = p_active_weapon == ActiveWeapon::Pistol
+                    || p_active_weapon == ActiveWeapon::Revolver;
+
+                let (l_hand_pos, r_hand_pos) = if is_rifle {
+                    // Rifle two-handed hold: Right hand on trigger, Left hand supporting barrel forward
+                    let r_pos = cam_transform.translation + cam_forward * 0.5 + cam_right * 0.15
                         - cam_up * 0.15;
+                    let l_pos = cam_transform.translation + cam_forward * 0.7 + cam_right * 0.05
+                        - cam_up * 0.12;
+                    (l_pos, r_pos)
+                } else if is_pistol {
+                    // Pistol two-handed hold: Both hands near each other in center
+                    let r_pos = cam_transform.translation + cam_forward * 0.5 + cam_right * 0.1
+                        - cam_up * 0.18;
+                    let l_pos = r_pos - cam_right * 0.05 - cam_forward * 0.03 + cam_up * 0.02;
+                    (l_pos, r_pos)
+                } else {
+                    // Melee / Default first-person hold
+                    let l_pos = nodes[4].position - right * 0.1 * p_weight * sh_w
+                        + forward * (0.4 + arm_swing)
+                        - Vec3::Y * 0.15;
 
-                if let Some(t) = p_axe_swing_timer {
-                    let chop_factor = (t * std::f32::consts::PI / 0.3).sin();
-                    r_hand_pos +=
-                        cam_forward * (chop_factor * 0.25) - cam_up * (chop_factor * 0.28);
-                }
+                    let mut r_pos =
+                        cam_transform.translation + cam_forward * 0.55 + cam_right * 0.2
+                            - cam_up * 0.15;
 
-                nodes[6].position = p_pos + Vec3::Y * p_height * 0.85 + right * 0.25 * p_weight; // R_Shoulder
+                    if let Some(t) = p_axe_swing_timer {
+                        let offset = if t < 0.1 {
+                            let factor = t / 0.1;
+                            cam_up * (factor * 0.18)
+                                - cam_forward * (factor * 0.15)
+                                - cam_right * (factor * 0.08)
+                        } else if t < 0.2 {
+                            let factor = (t - 0.1) / 0.1;
+                            let wind_up_offset =
+                                cam_up * 0.18 - cam_forward * 0.15 - cam_right * 0.08;
+                            let strike_offset =
+                                -cam_up * 0.25 + cam_forward * 0.35 + cam_right * 0.05;
+                            let t_smooth = factor * factor;
+                            Vec3::lerp(wind_up_offset, strike_offset, t_smooth)
+                        } else {
+                            let factor = (t - 0.2) / 0.1;
+                            let strike_offset =
+                                -cam_up * 0.25 + cam_forward * 0.35 + cam_right * 0.05;
+                            let t_smooth = factor * (2.0 - factor);
+                            Vec3::lerp(strike_offset, Vec3::ZERO, t_smooth)
+                        };
+                        r_pos += offset;
+                    }
+                    (l_pos, r_pos)
+                };
+
+                nodes[14].position = l_hand_pos; // L_Hand
                 nodes[15].position = r_hand_pos; // R_Hand
+
+                nodes[5].position = nodes[4].position
+                    + (nodes[14].position - nodes[4].position) * 0.5
+                    - right * 0.08
+                    - Vec3::Y * 0.05; // L_Elbow
                 nodes[7].position = nodes[6].position
                     + (nodes[15].position - nodes[6].position) * 0.5
                     + right * 0.08
                     - Vec3::Y * 0.05; // R_Elbow
             } else {
                 // THIRD PERSON ARM ALIGNMENT
-                let mut arm_swing = p_walk_timer.sin() * 0.25;
-                if p_axe_swing_timer.is_some() {
-                    arm_swing = 0.0;
-                }
+                let walk_swing = if p_is_walking {
+                    p_walk_timer.sin() * 0.22
+                } else {
+                    0.0
+                };
 
-                nodes[4].position = p_pos + Vec3::Y * p_height * 0.8
-                    - right * 0.25 * p_weight
-                    - forward * arm_swing; // L_Shoulder
-                nodes[14].position = nodes[4].position - right * 0.15 * p_weight
-                    + forward * (0.2 + arm_swing)
-                    - Vec3::Y * 0.15; // L_Hand
+                nodes[4].position = p_pos + Vec3::Y * chest_y - right * 0.25 * p_weight * sh_w; // L_Shoulder
+                nodes[6].position = p_pos + Vec3::Y * chest_y + right * 0.25 * p_weight * sh_w; // R_Shoulder
+
+                let is_rifle = p_active_weapon == ActiveWeapon::Rifle
+                    || p_active_weapon == ActiveWeapon::Sniper;
+                let is_pistol = p_active_weapon == ActiveWeapon::Pistol
+                    || p_active_weapon == ActiveWeapon::Revolver;
+
+                let (l_hand_pos, r_hand_pos) = if is_rifle {
+                    // Rifle two-handed hold
+                    let r_pos = nodes[2].position + forward * 0.45 + right * 0.12 * p_weight
+                        - Vec3::Y * 0.15 * p_height;
+                    let l_pos = nodes[2].position + forward * 0.65 + right * 0.02 * p_weight
+                        - Vec3::Y * 0.1 * p_height;
+                    (l_pos, r_pos)
+                } else if is_pistol {
+                    // Pistol two-handed hold
+                    let r_pos = nodes[2].position + forward * 0.45 + right * 0.05 * p_weight
+                        - Vec3::Y * 0.15 * p_height;
+                    let l_pos = r_pos - right * 0.06 * p_weight - forward * 0.03 + Vec3::Y * 0.02;
+                    (l_pos, r_pos)
+                } else {
+                    // Melee / Default behavior
+                    let l_pos = nodes[4].position - right * 0.15 * p_weight * sh_w
+                        + forward * (0.1 + walk_swing)
+                        - Vec3::Y * 0.38 * p_height;
+
+                    let mut r_pos = nodes[6].position
+                        + right * 0.15 * p_weight * sh_w
+                        + forward * (0.2 - walk_swing * 0.5)
+                        - Vec3::Y * 0.25 * p_height;
+
+                    if let Some(t) = p_axe_swing_timer {
+                        if t < 0.1 {
+                            let factor = t / 0.1;
+                            let wind_up_pos = nodes[6].position
+                                + Vec3::Y * 0.25 * p_height
+                                + right * 0.08 * p_weight * sh_w
+                                - forward * 0.15;
+                            r_pos = Vec3::lerp(r_pos, wind_up_pos, factor);
+                        } else if t < 0.2 {
+                            let factor = (t - 0.1) / 0.1;
+                            let wind_up_pos = nodes[6].position
+                                + Vec3::Y * 0.25 * p_height
+                                + right * 0.08 * p_weight * sh_w
+                                - forward * 0.15;
+                            let strike_pos = nodes[6].position - Vec3::Y * 0.45 * p_height
+                                + right * 0.18 * p_weight * sh_w
+                                + forward * 0.65;
+                            let t_smooth = factor * factor;
+                            r_pos = Vec3::lerp(wind_up_pos, strike_pos, t_smooth);
+                        } else {
+                            let factor = (t - 0.2) / 0.1;
+                            let strike_pos = nodes[6].position - Vec3::Y * 0.45 * p_height
+                                + right * 0.18 * p_weight * sh_w
+                                + forward * 0.65;
+                            let target_idle = nodes[6].position
+                                + right * 0.15 * p_weight * sh_w
+                                + forward * (0.2 - walk_swing * 0.5)
+                                - Vec3::Y * 0.25 * p_height;
+                            let t_smooth = factor * (2.0 - factor);
+                            r_pos = Vec3::lerp(strike_pos, target_idle, t_smooth);
+                        }
+                    }
+                    (l_pos, r_pos)
+                };
+
+                nodes[14].position = l_hand_pos; // L_Hand
+                nodes[15].position = r_hand_pos; // R_Hand
+
                 nodes[5].position = nodes[4].position
                     + (nodes[14].position - nodes[4].position) * 0.5
-                    - right * 0.12
-                    - Vec3::Y * 0.08; // L_Elbow
-
-                let mut r_hand_pos =
-                    p_pos + Vec3::Y * p_height * 0.65 + right * 0.3 * p_weight + forward * 0.3;
-
-                if let Some(t) = p_axe_swing_timer {
-                    let chop_factor = (t * std::f32::consts::PI / 0.3).sin();
-                    r_hand_pos = p_pos
-                        + Vec3::Y * p_height * (0.65 - chop_factor * 0.4)
-                        + right * 0.2 * p_weight
-                        + forward * (0.3 + chop_factor * 0.5);
-                }
-
-                nodes[6].position = p_pos + Vec3::Y * p_height * 0.8 + right * 0.25 * p_weight; // R_Shoulder
-                nodes[15].position = r_hand_pos; // R_Hand
+                    - right * 0.08 * p_weight * sh_w
+                    - forward * 0.08; // L_Elbow
                 nodes[7].position = nodes[6].position
                     + (nodes[15].position - nodes[6].position) * 0.5
-                    + right * 0.12
-                    - Vec3::Y * 0.08; // R_Elbow
+                    + right * 0.08 * p_weight * sh_w
+                    - forward * 0.06; // R_Elbow
             }
 
             let l_leg_swing = p_walk_timer.sin() * 0.35 * p_height;
             let r_leg_swing = -p_walk_timer.sin() * 0.35 * p_height;
 
-            nodes[8].position = p_pos + Vec3::Y * p_height * 0.45 - right * 0.16 * p_weight; // L_Hip
-            nodes[11].position = p_pos + Vec3::Y * p_height * 0.45 + right * 0.16 * p_weight; // R_Hip
+            nodes[8].position = p_pos + Vec3::Y * pelvis_y - right * 0.16 * p_weight * waist; // L_Hip
+            nodes[11].position = p_pos + Vec3::Y * pelvis_y + right * 0.16 * p_weight * waist; // R_Hip
 
-            nodes[9].position = p_pos + Vec3::Y * p_height * 0.22 - right * 0.16 * p_weight
+            nodes[9].position = p_pos + Vec3::Y * knee_y - right * 0.16 * p_weight * waist
                 + forward * l_leg_swing.max(0.0); // L_Knee
             nodes[12].position = p_pos
-                + Vec3::Y * p_height * 0.22
-                + right * 0.16 * p_weight
+                + Vec3::Y * knee_y
+                + right * 0.16 * p_weight * waist
                 + forward * r_leg_swing.max(0.0); // R_Knee
 
             let l_foot_lift = if l_leg_swing > 0.0 {
@@ -2572,16 +2763,22 @@ fn player_movement_and_ragdoll_system(
             let is_grounded = p_pos.y <= ground_y + 0.05;
             let l_foot_y = if is_grounded {
                 // Use the effective floor height so feet stay correct in houses/basements
-                let ft_terrain =
-                    get_bilinear_height(p_pos.x - right.x * 0.16, p_pos.z - right.z * 0.16, &map);
+                let ft_terrain = get_bilinear_height(
+                    p_pos.x - right.x * 0.16 * waist,
+                    p_pos.z - right.z * 0.16 * waist,
+                    &map,
+                );
                 let ft_ground = get_effective_floor_height(p_pos, ft_terrain);
                 ft_ground + l_foot_lift
             } else {
                 p_pos.y + l_foot_lift
             };
             let r_foot_y = if is_grounded {
-                let ft_terrain =
-                    get_bilinear_height(p_pos.x + right.x * 0.16, p_pos.z + right.z * 0.16, &map);
+                let ft_terrain = get_bilinear_height(
+                    p_pos.x + right.x * 0.16 * waist,
+                    p_pos.z + right.z * 0.16 * waist,
+                    &map,
+                );
                 let ft_ground = get_effective_floor_height(p_pos, ft_terrain);
                 ft_ground + r_foot_lift
             } else {
@@ -2589,14 +2786,14 @@ fn player_movement_and_ragdoll_system(
             };
 
             nodes[10].position = Vec3::new(
-                p_pos.x - right.x * 0.16 + forward.x * l_leg_swing,
+                p_pos.x - right.x * 0.16 * waist + forward.x * l_leg_swing,
                 l_foot_y,
-                p_pos.z - right.z * 0.16 + forward.z * l_leg_swing,
+                p_pos.z - right.z * 0.16 * waist + forward.z * l_leg_swing,
             ); // L_Foot
             nodes[13].position = Vec3::new(
-                p_pos.x + right.x * 0.16 + forward.x * r_leg_swing,
+                p_pos.x + right.x * 0.16 * waist + forward.x * r_leg_swing,
                 r_foot_y,
-                p_pos.z + right.z * 0.16 + forward.z * r_leg_swing,
+                p_pos.z + right.z * 0.16 * waist + forward.z * r_leg_swing,
             ); // R_Foot
         }
 
@@ -4934,8 +5131,11 @@ fn gun_fire_and_bullet_system(
                 let Ok((cam_transform, _camera)) = camera_query.single() else {
                     return;
                 };
-                let start_pos = cam_transform.translation + cam_transform.forward() * 0.5;
-                let forward = cam_transform.forward();
+                let hand_pos = player.nodes[15].position;
+                let aim_target = cam_transform.translation + cam_transform.forward() * 100.0;
+                let shoot_dir = (aim_target - hand_pos).normalize_or_zero();
+                let start_pos = hand_pos + shoot_dir * 0.4;
+                let forward = shoot_dir;
 
                 let (bullet_speed, gravity, damage, sound_file) = match player.active_weapon {
                     ActiveWeapon::Pistol => (75.0, 9.8, 12.0, "pistol_shoot.wav"),

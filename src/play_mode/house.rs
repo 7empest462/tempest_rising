@@ -115,31 +115,40 @@ enum CellType {
 }
 
 // Flatten terrain dynamically at the placed house footprint center
-pub fn flatten_terrain(mut map: ResMut<TempestMap>, mansion_settings: Res<MansionSettings>) {
+pub fn flatten_terrain(
+    mut map: ResMut<TempestMap>,
+    mansion_settings: Res<MansionSettings>,
+    mut ev_grass: MessageWriter<crate::grass::GenerateGrassEvent>,
+) {
     let mut house_pos = Vec3::new(0.0, 1.5, 0.0);
+    let mut house_placed = false;
     for p in map.prefabs.iter() {
         if p.prefab_type == "house" {
             house_pos = Vec3::from_array(p.position);
+            house_placed = true;
             break;
         }
     }
 
-    let half_map_w = map.width as f32 / 2.0;
-    let half_map_h = map.height as f32 / 2.0;
+    if house_placed {
+        let half_map_w = map.width as f32 / 2.0;
+        let half_map_h = map.height as f32 / 2.0;
 
-    let half_w = (mansion_settings.cols as f32 * mansion_settings.cell_size) / 2.0;
-    let half_d = (mansion_settings.rows as f32 * mansion_settings.cell_size) / 2.0;
+        let half_w = (mansion_settings.cols as f32 * mansion_settings.cell_size) / 2.0;
+        let half_d = (mansion_settings.rows as f32 * mansion_settings.cell_size) / 2.0;
 
-    let min_x_idx = ((house_pos.x - half_w - 2.0) + half_map_w).max(0.0) as u32;
-    let max_x_idx = ((house_pos.x + half_w + 2.0) + half_map_w).min(map.width as f32) as u32;
-    let min_z_idx = ((house_pos.z - half_d - 2.0) + half_map_h).max(0.0) as u32;
-    let max_z_idx = ((house_pos.z + half_d + 2.0) + half_map_h).min(map.height as f32) as u32;
+        let min_x_idx = ((house_pos.x - half_w - 2.0) + half_map_w).max(0.0) as u32;
+        let max_x_idx = ((house_pos.x + half_w + 2.0) + half_map_w).min(map.width as f32) as u32;
+        let min_z_idx = ((house_pos.z - half_d - 2.0) + half_map_h).max(0.0) as u32;
+        let max_z_idx = ((house_pos.z + half_d + 2.0) + half_map_h).min(map.height as f32) as u32;
 
-    for mz in min_z_idx..max_z_idx {
-        for mx in min_x_idx..max_x_idx {
-            map.set_height(mx, mz, 1.5);
-            map.set_biome(mx, mz, Biome::Temperate);
+        for mz in min_z_idx..max_z_idx {
+            for mx in min_x_idx..max_x_idx {
+                map.set_height(mx, mz, 1.5);
+                map.set_biome(mx, mz, Biome::Temperate);
+            }
         }
+        ev_grass.write(crate::grass::GenerateGrassEvent);
     }
 }
 
@@ -238,6 +247,7 @@ fn spawn_window_wall(
     wall_material: &Handle<StandardMaterial>,
     pos: Vec3,
     is_horizontal: bool,
+    cell_size: f32,
 ) {
     let iron_mat = materials.add(StandardMaterial {
         base_color: Color::srgb(0.2, 0.2, 0.22), // dark iron
@@ -246,25 +256,32 @@ fn spawn_window_wall(
         ..default()
     });
 
+    let window_width = 1.4;
+    let post_width = (cell_size - window_width) / 2.0;
+
     if is_horizontal {
-        // Left post (width 1.8)
-        let lp_size = Vec3::new(1.8, 3.5, 0.2);
+        // Left post
+        let lp_size = Vec3::new(post_width, 3.5, 0.2);
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::from_size(lp_size))),
             MeshMaterial3d(wall_material.clone()),
-            Transform::from_translation(pos + Vec3::new(-1.6, 0.0, 0.0)),
+            Transform::from_translation(
+                pos + Vec3::new(-(cell_size * 0.5 - post_width * 0.5), 0.0, 0.0),
+            ),
             WallCollider {
                 half_extents: lp_size * 0.5,
             },
             HouseMarker,
             PlayModeEntity,
         ));
-        // Right post (width 1.8)
-        let rp_size = Vec3::new(1.8, 3.5, 0.2);
+        // Right post
+        let rp_size = Vec3::new(post_width, 3.5, 0.2);
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::from_size(rp_size))),
             MeshMaterial3d(wall_material.clone()),
-            Transform::from_translation(pos + Vec3::new(1.6, 0.0, 0.0)),
+            Transform::from_translation(
+                pos + Vec3::new(cell_size * 0.5 - post_width * 0.5, 0.0, 0.0),
+            ),
             WallCollider {
                 half_extents: rp_size * 0.5,
             },
@@ -272,7 +289,7 @@ fn spawn_window_wall(
             PlayModeEntity,
         ));
         // Bottom post (width 1.4, height 1.0)
-        let bp_size = Vec3::new(1.4, 1.0, 0.2);
+        let bp_size = Vec3::new(window_width, 1.0, 0.2);
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::from_size(bp_size))),
             MeshMaterial3d(wall_material.clone()),
@@ -284,7 +301,7 @@ fn spawn_window_wall(
             PlayModeEntity,
         ));
         // Top post (width 1.4, height 1.0)
-        let tp_size = Vec3::new(1.4, 1.0, 0.2);
+        let tp_size = Vec3::new(window_width, 1.0, 0.2);
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::from_size(tp_size))),
             MeshMaterial3d(wall_material.clone()),
@@ -308,32 +325,36 @@ fn spawn_window_wall(
         }
     } else {
         // Vertical window wall (along Z)
-        // Left post (width 1.8 along Z)
-        let lp_size = Vec3::new(0.2, 3.5, 1.8);
+        // Left post (along negative Z)
+        let lp_size = Vec3::new(0.2, 3.5, post_width);
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::from_size(lp_size))),
             MeshMaterial3d(wall_material.clone()),
-            Transform::from_translation(pos + Vec3::new(0.0, 0.0, -1.6)),
+            Transform::from_translation(
+                pos + Vec3::new(0.0, 0.0, -(cell_size * 0.5 - post_width * 0.5)),
+            ),
             WallCollider {
                 half_extents: lp_size * 0.5,
             },
             HouseMarker,
             PlayModeEntity,
         ));
-        // Right post (width 1.8 along Z)
-        let rp_size = Vec3::new(0.2, 3.5, 1.8);
+        // Right post (along positive Z)
+        let rp_size = Vec3::new(0.2, 3.5, post_width);
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::from_size(rp_size))),
             MeshMaterial3d(wall_material.clone()),
-            Transform::from_translation(pos + Vec3::new(0.0, 0.0, 1.6)),
+            Transform::from_translation(
+                pos + Vec3::new(0.0, 0.0, cell_size * 0.5 - post_width * 0.5),
+            ),
             WallCollider {
                 half_extents: rp_size * 0.5,
             },
             HouseMarker,
             PlayModeEntity,
         ));
-        // Bottom post (height 1.0)
-        let bp_size = Vec3::new(0.2, 1.0, 1.4);
+        // Bottom post
+        let bp_size = Vec3::new(0.2, 1.0, window_width);
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::from_size(bp_size))),
             MeshMaterial3d(wall_material.clone()),
@@ -344,8 +365,8 @@ fn spawn_window_wall(
             HouseMarker,
             PlayModeEntity,
         ));
-        // Top post (height 1.0)
-        let tp_size = Vec3::new(0.2, 1.0, 1.4);
+        // Top post
+        let tp_size = Vec3::new(0.2, 1.0, window_width);
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::from_size(tp_size))),
             MeshMaterial3d(wall_material.clone()),
@@ -376,11 +397,12 @@ fn spawn_solid_wall(
     material: &Handle<StandardMaterial>,
     pos: Vec3,
     is_horizontal: bool,
+    cell_size: f32,
 ) {
     let size = if is_horizontal {
-        Vec3::new(5.0, 3.5, 0.2)
+        Vec3::new(cell_size, 3.5, 0.2)
     } else {
-        Vec3::new(0.2, 3.5, 5.0)
+        Vec3::new(0.2, 3.5, cell_size)
     };
     commands.spawn((
         Mesh3d(meshes.add(Cuboid::from_size(size))),
@@ -394,6 +416,7 @@ fn spawn_solid_wall(
     ));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_door_wall(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
@@ -402,6 +425,7 @@ fn spawn_door_wall(
     pos: Vec3,
     is_horizontal: bool,
     asset_server: &Res<AssetServer>,
+    cell_size: f32,
 ) {
     let door_width = 1.6;
     let door_height = 2.2;
@@ -412,13 +436,17 @@ fn spawn_door_wall(
         ..default()
     });
 
+    let post_width = (cell_size - door_width) / 2.0;
+
     if is_horizontal {
-        // Left post (length 1.7m)
-        let lp_size = Vec3::new(1.7, 3.5, 0.2);
+        // Left post
+        let lp_size = Vec3::new(post_width, 3.5, 0.2);
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::from_size(lp_size))),
             MeshMaterial3d(wall_material.clone()),
-            Transform::from_translation(pos + Vec3::new(-1.65, 0.0, 0.0)),
+            Transform::from_translation(
+                pos + Vec3::new(-(cell_size * 0.5 - post_width * 0.5), 0.0, 0.0),
+            ),
             WallCollider {
                 half_extents: lp_size * 0.5,
             },
@@ -426,12 +454,14 @@ fn spawn_door_wall(
             PlayModeEntity,
         ));
 
-        // Right post (length 1.7m)
-        let rp_size = Vec3::new(1.7, 3.5, 0.2);
+        // Right post
+        let rp_size = Vec3::new(post_width, 3.5, 0.2);
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::from_size(rp_size))),
             MeshMaterial3d(wall_material.clone()),
-            Transform::from_translation(pos + Vec3::new(1.65, 0.0, 0.0)),
+            Transform::from_translation(
+                pos + Vec3::new(cell_size * 0.5 - post_width * 0.5, 0.0, 0.0),
+            ),
             WallCollider {
                 half_extents: rp_size * 0.5,
             },
@@ -492,11 +522,13 @@ fn spawn_door_wall(
         commands.entity(parent_id).add_child(child_id);
     } else {
         // Vertical door wall (along Z)
-        let lp_size = Vec3::new(0.2, 3.5, 1.7);
+        let lp_size = Vec3::new(0.2, 3.5, post_width);
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::from_size(lp_size))),
             MeshMaterial3d(wall_material.clone()),
-            Transform::from_translation(pos + Vec3::new(0.0, 0.0, -1.65)),
+            Transform::from_translation(
+                pos + Vec3::new(0.0, 0.0, -(cell_size * 0.5 - post_width * 0.5)),
+            ),
             WallCollider {
                 half_extents: lp_size * 0.5,
             },
@@ -504,11 +536,13 @@ fn spawn_door_wall(
             PlayModeEntity,
         ));
 
-        let rp_size = Vec3::new(0.2, 3.5, 1.7);
+        let rp_size = Vec3::new(0.2, 3.5, post_width);
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::from_size(rp_size))),
             MeshMaterial3d(wall_material.clone()),
-            Transform::from_translation(pos + Vec3::new(0.0, 0.0, 1.65)),
+            Transform::from_translation(
+                pos + Vec3::new(0.0, 0.0, cell_size * 0.5 - post_width * 0.5),
+            ),
             WallCollider {
                 half_extents: rp_size * 0.5,
             },
@@ -688,6 +722,7 @@ fn spawn_house(
                             &wall_mat,
                             Vec3::new(x_center, y_base + 1.75, house_pos.z - half_d),
                             true,
+                            cell_size,
                         );
                     } else {
                         spawn_solid_wall(
@@ -696,6 +731,7 @@ fn spawn_house(
                             &wall_mat,
                             Vec3::new(x_center, y_base + 1.75, house_pos.z - half_d),
                             true,
+                            cell_size,
                         );
                     }
                 } else {
@@ -748,6 +784,7 @@ fn spawn_house(
                                     ),
                                     true,
                                     &asset_server,
+                                    cell_size,
                                 );
                             }
                         } else if cell_type == CellType::Bedroom && n_type == CellType::Bedroom {
@@ -761,6 +798,7 @@ fn spawn_house(
                                     house_pos.z - half_d + (r as f32) * cell_size,
                                 ),
                                 true,
+                                cell_size,
                             );
                         }
                     }
@@ -776,6 +814,7 @@ fn spawn_house(
                             &wall_mat,
                             Vec3::new(house_pos.x - half_w, y_base + 1.75, z_center),
                             false,
+                            cell_size,
                         );
                     } else {
                         spawn_solid_wall(
@@ -784,6 +823,7 @@ fn spawn_house(
                             &wall_mat,
                             Vec3::new(house_pos.x - half_w, y_base + 1.75, z_center),
                             false,
+                            cell_size,
                         );
                     }
                 } else {
@@ -810,6 +850,7 @@ fn spawn_house(
                                 ),
                                 false,
                                 &asset_server,
+                                cell_size,
                             );
                         } else if cell_type == CellType::Bedroom && w_type == CellType::Bedroom {
                             spawn_solid_wall(
@@ -822,6 +863,7 @@ fn spawn_house(
                                     z_center,
                                 ),
                                 false,
+                                cell_size,
                             );
                         }
                     }
@@ -838,6 +880,7 @@ fn spawn_house(
                             Vec3::new(x_center, y_base + 1.75, house_pos.z + half_d),
                             true,
                             &asset_server,
+                            cell_size,
                         );
                     } else if cell_type == CellType::Bedroom {
                         spawn_window_wall(
@@ -847,6 +890,7 @@ fn spawn_house(
                             &wall_mat,
                             Vec3::new(x_center, y_base + 1.75, house_pos.z + half_d),
                             true,
+                            cell_size,
                         );
                     } else {
                         spawn_solid_wall(
@@ -855,6 +899,7 @@ fn spawn_house(
                             &wall_mat,
                             Vec3::new(x_center, y_base + 1.75, house_pos.z + half_d),
                             true,
+                            cell_size,
                         );
                     }
                 }
@@ -869,6 +914,7 @@ fn spawn_house(
                             &wall_mat,
                             Vec3::new(house_pos.x + half_w, y_base + 1.75, z_center),
                             false,
+                            cell_size,
                         );
                     } else {
                         spawn_solid_wall(
@@ -877,6 +923,7 @@ fn spawn_house(
                             &wall_mat,
                             Vec3::new(house_pos.x + half_w, y_base + 1.75, z_center),
                             false,
+                            cell_size,
                         );
                     }
                 }
@@ -1301,11 +1348,13 @@ fn spawn_house(
     let step_depth = total_depth / num_steps as f32; // 0.5m depth per step
     let step_width = 1.8;
 
+    let start_z = house_pos.z - half_d + 3.0 * cell_size;
+
     // Spawn visual steps (no individual physics colliders to prevent getting stuck)
     for step_idx in 0..num_steps {
         let step_y = house_pos.y + (step_idx as f32) * step_height + step_height * 0.5;
-        // Start from house_pos.z + 5.0 (bottom, South foyer) and go up to house_pos.z - 5.0 (top, North bedroom/hallway boundary)
-        let step_z = (house_pos.z + 5.0) - (step_idx as f32) * step_depth - step_depth * 0.5;
+        // Start from start_z (bottom, South foyer) and go up to start_z - total_depth (top, North bedroom/hallway boundary)
+        let step_z = start_z - (step_idx as f32) * step_depth - step_depth * 0.5;
 
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::new(step_width, step_height, step_depth))),
@@ -1316,16 +1365,17 @@ fn spawn_house(
         ));
     }
 
-    // Spawn a single smooth tilted ramp collider underneath the steps (thick and wide to prevent clipping/sliding off)
+    // Spawn a single smooth tilted ramp collider matching step width (thickness 0.2m)
     let pitch = (3.5f32 / total_depth).atan();
     let slope_len = (total_depth.powi(2) + 3.5f32.powi(2)).sqrt();
     let local_y = Quat::from_rotation_x(pitch) * Vec3::Y;
-    let center_pos = Vec3::new(staircase_x, house_pos.y + 1.75, house_pos.z) - local_y * 1.485;
+    let center_z = start_z - total_depth * 0.5;
+    let center_pos = Vec3::new(staircase_x, house_pos.y + 1.75, center_z) - local_y * 0.1;
 
     commands.spawn((
         Transform::from_translation(center_pos).with_rotation(Quat::from_rotation_x(pitch)),
         RigidBody::Static,
-        Collider::cuboid(4.8, 3.0, slope_len),
+        Collider::cuboid(step_width, 0.2, slope_len),
         HouseMarker,
         PlayModeEntity,
     ));
@@ -1333,7 +1383,9 @@ fn spawn_house(
     // -----------------------------------------------------------------
     // MANSION PITCHED ROOF (using roof_shingles.png)
     // -----------------------------------------------------------------
-    let mansion_roof_mesh = meshes.add(Cuboid::new(41.0, 0.1, 11.0));
+    let roof_w = grid_cols as f32 * cell_size + 1.0;
+    let roof_slope_len = half_d / 0.20_f32.cos() + 1.0;
+    let mansion_roof_mesh = meshes.add(Cuboid::new(roof_w, 0.1, roof_slope_len));
     let mansion_roof_mat = materials.add(StandardMaterial {
         base_color_texture: Some(asset_server.load("textures/roof_shingles.png")),
         perceptual_roughness: 0.9,
@@ -1344,10 +1396,14 @@ fn spawn_house(
     commands.spawn((
         Mesh3d(mansion_roof_mesh.clone()),
         MeshMaterial3d(mansion_roof_mat.clone()),
-        Transform::from_xyz(house_pos.x, house_pos.y + 7.0 + 1.0, house_pos.z - 5.0)
-            .with_rotation(Quat::from_rotation_x(-0.20)), // pitch up towards center
+        Transform::from_xyz(
+            house_pos.x,
+            house_pos.y + 7.0 + 1.0,
+            house_pos.z - half_d * 0.5,
+        )
+        .with_rotation(Quat::from_rotation_x(-0.20)), // pitch up towards center
         RigidBody::Static,
-        Collider::cuboid(41.0, 0.1, 11.0),
+        Collider::cuboid(roof_w, 0.1, roof_slope_len),
         HouseMarker,
         PlayModeEntity,
     ));
@@ -1356,10 +1412,14 @@ fn spawn_house(
     commands.spawn((
         Mesh3d(mansion_roof_mesh),
         MeshMaterial3d(mansion_roof_mat),
-        Transform::from_xyz(house_pos.x, house_pos.y + 7.0 + 1.0, house_pos.z + 5.0)
-            .with_rotation(Quat::from_rotation_x(0.20)), // pitch up towards center
+        Transform::from_xyz(
+            house_pos.x,
+            house_pos.y + 7.0 + 1.0,
+            house_pos.z + half_d * 0.5,
+        )
+        .with_rotation(Quat::from_rotation_x(0.20)), // pitch up towards center
         RigidBody::Static,
-        Collider::cuboid(41.0, 0.1, 11.0),
+        Collider::cuboid(roof_w, 0.1, roof_slope_len),
         HouseMarker,
         PlayModeEntity,
     ));

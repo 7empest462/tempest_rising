@@ -1095,14 +1095,14 @@ pub fn creature_ai_system(
                     let to_player = (player_pos - creature.position).normalize_or_zero();
                     creature.yaw = to_player.z.atan2(to_player.x);
                     creature.velocity = to_player * 4.5;
-                } else if dist_to_player > 5.0 {
-                    // Walk toward player
+                } else if dist_to_player < 4.0 {
+                    // Too close to player - move away from player to prevent piling up
                     creature.state = CreatureState::Wandering;
-                    let to_player = (player_pos - creature.position).normalize_or_zero();
-                    creature.yaw = to_player.z.atan2(to_player.x);
-                    creature.velocity = to_player * 2.0;
+                    let away_from_player = (creature.position - player_pos).normalize_or_zero();
+                    creature.yaw = away_from_player.z.atan2(away_from_player.x);
+                    creature.velocity = away_from_player * 2.0;
                 } else {
-                    // Patrol/idle near player
+                    // Patrol/idle near player (4.0 to 12.0 meters)
                     creature.wander_timer -= dt;
                     if creature.wander_timer <= 0.0 {
                         creature.wander_timer = 2.0 + rand::random::<f32>() * 3.0;

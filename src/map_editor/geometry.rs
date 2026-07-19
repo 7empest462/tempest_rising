@@ -28,6 +28,46 @@ impl EditableMesh {
         Self { vertices, faces }
     }
 
+    /// Create a UV sphere centered at origin
+    pub fn new_sphere(radius: f32) -> Self {
+        let lat_segments = 32;
+        let lon_segments = 64;
+        let mut vertices = Vec::new();
+        let mut faces = Vec::new();
+
+        // Generate vertices
+        for lat in 0..=lat_segments {
+            let theta = (lat as f32 / lat_segments as f32) * std::f32::consts::PI;
+            let sin_theta = theta.sin();
+            let cos_theta = theta.cos();
+
+            for lon in 0..=lon_segments {
+                let phi = (lon as f32 / lon_segments as f32) * std::f32::consts::TAU;
+                let sin_phi = phi.sin();
+                let cos_phi = phi.cos();
+
+                let x = radius * sin_theta * cos_phi;
+                let y = radius * cos_theta;
+                let z = radius * sin_theta * sin_phi;
+
+                vertices.push([x, y, z]);
+            }
+        }
+
+        // Generate faces
+        for lat in 0..lat_segments {
+            for lon in 0..lon_segments {
+                let first = (lat * (lon_segments + 1) + lon) as u32;
+                let second = first + lon_segments as u32 + 1;
+
+                // Create quad faces with counter-clockwise (CCW) winding order pointing outwards
+                faces.push(vec![first, first + 1, second + 1, second]);
+            }
+        }
+
+        Self { vertices, faces }
+    }
+
     /// Converts this EditableMesh to a Bevy Render Mesh (triangulating arbitrary polygons)
     pub fn to_bevy_mesh(&self) -> Mesh {
         let mut positions = Vec::new();
