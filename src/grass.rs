@@ -138,13 +138,20 @@ pub struct GrassChunkData {
     pub single_mesh: Option<Mesh>,
 }
 
-pub fn generate_grass_chunks(map: &TempestMap) -> Vec<GrassChunkData> {
+pub fn generate_grass_chunks(
+    map: &TempestMap,
+    settings: Option<&SplatmapSettings>,
+    water_height: Option<f32>,
+) -> Vec<GrassChunkData> {
     let w = map.width;
     let h = map.height;
     let offset_x = -(w as f32) / 2.0;
     let offset_z = -(h as f32) / 2.0;
 
-    let splat = SplatmapSettings::default();
+    let default_splat = SplatmapSettings::default();
+    let splat = settings.unwrap_or(&default_splat);
+    let water_h = water_height.unwrap_or(0.0);
+    let min_grass_height = splat.sand_height.max(water_h + 0.2);
 
     let chunk_size = 32;
     let chunks_x = w.div_ceil(chunk_size);
@@ -173,7 +180,7 @@ pub fn generate_grass_chunks(map: &TempestMap) -> Vec<GrassChunkData> {
                 for x in start_x..end_x {
                     let y = map.get_height(x, z);
 
-                    if y <= splat.sand_height || y >= splat.snow_height {
+                    if y <= min_grass_height || y >= splat.snow_height {
                         continue;
                     }
 
@@ -185,8 +192,17 @@ pub fn generate_grass_chunks(map: &TempestMap) -> Vec<GrassChunkData> {
                     let world_x = x as f32 + offset_x;
                     let world_z = z as f32 + offset_z;
 
-                    // Skip grass inside the mansion footprint (X: [-22, 22], Z: [-12, 12])
-                    if world_x.abs() <= 22.0 && world_z.abs() <= 12.0 {
+                    // Skip grass inside the mansion footprint
+                    let mut house_pos = Vec3::new(-35.0, 1.5, -35.0);
+                    for p in &map.prefabs {
+                        if p.prefab_type == "house" {
+                            house_pos = Vec3::from_array(p.position);
+                            break;
+                        }
+                    }
+                    if (world_x - house_pos.x).abs() <= 22.0
+                        && (world_z - house_pos.z).abs() <= 12.0
+                    {
                         continue;
                     }
 
@@ -263,7 +279,9 @@ pub fn generate_grass_chunks(map: &TempestMap) -> Vec<GrassChunkData> {
                                     }
 
                                     // Skip grass inside the mansion footprint
-                                    if px.abs() <= 22.0 && pz.abs() <= 12.0 {
+                                    if (px - house_pos.x).abs() <= 22.0
+                                        && (pz - house_pos.z).abs() <= 12.0
+                                    {
                                         continue;
                                     }
 
@@ -337,14 +355,17 @@ pub fn generate_grass_chunks(map: &TempestMap) -> Vec<GrassChunkData> {
     result
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_grass_system(
     mut commands: Commands,
     mut ev_generate: MessageReader<GenerateGrassEvent>,
-    grass_query: Query<Entity, With<ProceduralGrass>>,
+    grass_query: Query<Entity, (With<ProceduralGrass>, Without<ChildOf>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<GrassMaterial>>,
     asset_server: Res<AssetServer>,
     map: Option<Res<TempestMap>>,
+    splat_settings: Option<Res<SplatmapSettings>>,
+    water_settings: Option<Res<crate::map_editor::WaterSettings>>,
 ) {
     if ev_generate.read().next().is_none() {
         return;
@@ -380,7 +401,8 @@ fn spawn_grass_system(
         extension: GrassWindExtension {},
     });
 
-    let chunks = generate_grass_chunks(&map);
+    let water_h = water_settings.map(|s| s.height);
+    let chunks = generate_grass_chunks(&map, splat_settings.as_deref(), water_h);
     for chunk in chunks {
         if let Some(mesh) = chunk.patch_mesh {
             commands.spawn((

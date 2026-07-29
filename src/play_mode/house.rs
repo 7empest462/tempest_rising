@@ -3,6 +3,7 @@ use crate::map_editor::data::{Biome, TempestMap};
 use crate::play_mode::{PlayModeEntity, PlayModePlayer, PlayerInventory, WallCollider};
 use avian3d::prelude::{Collider, Position, RigidBody};
 use bevy::prelude::*;
+use bevy_egui::egui;
 
 pub struct HousePlugin;
 
@@ -21,7 +22,10 @@ impl Plugin for HousePlugin {
                     pressure_plate_system,
                     gate_slide_system,
                     pedestal_glow_system,
+                    vault_door_unlock_system,
+                    research_complex_ui_system,
                 )
+                    .chain()
                     .run_if(in_state(AppState::PlayMode)),
             );
     }
@@ -32,7 +36,29 @@ pub struct HousePuzzleState {
     pub bookcase_opened: bool,
     pub basement_solved: bool,
     pub artifact_collected: bool,
+    pub vault_unlocked: bool,
+    pub active_terminal_log: Option<u32>,
+    pub show_security_keypad: bool,
+    pub keypad_input: String,
+    pub show_synthesizer_ui: bool,
 }
+
+#[allow(dead_code)]
+#[derive(Component)]
+pub struct ResearchTerminal {
+    pub terminal_id: u32,
+    pub title: String,
+    pub log_text: String,
+}
+
+#[derive(Component)]
+pub struct BasementSecurityConsole;
+
+#[derive(Component)]
+pub struct BasementVaultDoor;
+
+#[derive(Component)]
+pub struct PlasmaSynthesizerConsole;
 
 #[derive(Resource, Clone, Copy)]
 pub struct MansionSettings {
@@ -120,36 +146,32 @@ pub fn flatten_terrain(
     mansion_settings: Res<MansionSettings>,
     mut ev_grass: MessageWriter<crate::grass::GenerateGrassEvent>,
 ) {
-    let mut house_pos = Vec3::new(0.0, 1.5, 0.0);
-    let mut house_placed = false;
+    let mut house_pos = Vec3::new(-35.0, 1.5, -35.0);
     for p in map.prefabs.iter() {
         if p.prefab_type == "house" {
             house_pos = Vec3::from_array(p.position);
-            house_placed = true;
             break;
         }
     }
 
-    if house_placed {
-        let half_map_w = map.width as f32 / 2.0;
-        let half_map_h = map.height as f32 / 2.0;
+    let half_map_w = map.width as f32 / 2.0;
+    let half_map_h = map.height as f32 / 2.0;
 
-        let half_w = (mansion_settings.cols as f32 * mansion_settings.cell_size) / 2.0;
-        let half_d = (mansion_settings.rows as f32 * mansion_settings.cell_size) / 2.0;
+    let half_w = (mansion_settings.cols as f32 * mansion_settings.cell_size) / 2.0;
+    let half_d = (mansion_settings.rows as f32 * mansion_settings.cell_size) / 2.0;
 
-        let min_x_idx = ((house_pos.x - half_w - 2.0) + half_map_w).max(0.0) as u32;
-        let max_x_idx = ((house_pos.x + half_w + 2.0) + half_map_w).min(map.width as f32) as u32;
-        let min_z_idx = ((house_pos.z - half_d - 2.0) + half_map_h).max(0.0) as u32;
-        let max_z_idx = ((house_pos.z + half_d + 2.0) + half_map_h).min(map.height as f32) as u32;
+    let min_x_idx = ((house_pos.x - half_w - 8.0) + half_map_w).max(0.0) as u32;
+    let max_x_idx = ((house_pos.x + half_w + 8.0) + half_map_w).min(map.width as f32) as u32;
+    let min_z_idx = ((house_pos.z - half_d - 8.0) + half_map_h).max(0.0) as u32;
+    let max_z_idx = ((house_pos.z + half_d + 8.0) + half_map_h).min(map.height as f32) as u32;
 
-        for mz in min_z_idx..max_z_idx {
-            for mx in min_x_idx..max_x_idx {
-                map.set_height(mx, mz, 1.5);
-                map.set_biome(mx, mz, Biome::Temperate);
-            }
+    for mz in min_z_idx..max_z_idx {
+        for mx in min_x_idx..max_x_idx {
+            map.set_height(mx, mz, 1.5);
+            map.set_biome(mx, mz, Biome::Temperate);
         }
-        ev_grass.write(crate::grass::GenerateGrassEvent);
     }
+    ev_grass.write(crate::grass::GenerateGrassEvent);
 }
 
 fn get_cell_type(floor: u32, c: i32, r: i32) -> CellType {
@@ -240,6 +262,38 @@ fn spawn_lantern(
     ));
 }
 
+fn spawn_solid_wall(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    material: &Handle<StandardMaterial>,
+    pos: Vec3,
+    is_horizontal: bool,
+    cell_size: f32,
+) {
+    let size = if is_horizontal {
+        Vec3::new(cell_size + 0.2, 3.5, 0.2)
+    } else {
+        Vec3::new(0.2, 3.5, cell_size + 0.2)
+    };
+    let col_half = if is_horizontal {
+        Vec3::new((cell_size + 0.2) * 0.5, 1.75, 0.35)
+    } else {
+        Vec3::new(0.35, 1.75, (cell_size + 0.2) * 0.5)
+    };
+
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::from_size(size))),
+        MeshMaterial3d(material.clone()),
+        Transform::from_translation(pos),
+        WallCollider {
+            half_extents: col_half,
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+}
+
+#[allow(clippy::too_many_arguments)]
 fn spawn_window_wall(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
@@ -249,19 +303,19 @@ fn spawn_window_wall(
     is_horizontal: bool,
     cell_size: f32,
 ) {
+    let window_width = 1.6;
+    let post_width = (cell_size - window_width) / 2.0;
+
     let iron_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.2, 0.2, 0.22), // dark iron
-        metallic: 0.8,
-        perceptual_roughness: 0.4,
+        base_color: Color::srgb(0.1, 0.1, 0.1),
+        metallic: 0.9,
+        perceptual_roughness: 0.2,
         ..default()
     });
 
-    let window_width = 1.4;
-    let post_width = (cell_size - window_width) / 2.0;
-
     if is_horizontal {
         // Left post
-        let lp_size = Vec3::new(post_width, 3.5, 0.2);
+        let lp_size = Vec3::new(post_width + 0.1, 3.5, 0.2);
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::from_size(lp_size))),
             MeshMaterial3d(wall_material.clone()),
@@ -269,13 +323,13 @@ fn spawn_window_wall(
                 pos + Vec3::new(-(cell_size * 0.5 - post_width * 0.5), 0.0, 0.0),
             ),
             WallCollider {
-                half_extents: lp_size * 0.5,
+                half_extents: Vec3::new((post_width + 0.1) * 0.5, 1.75, 0.35),
             },
             HouseMarker,
             PlayModeEntity,
         ));
         // Right post
-        let rp_size = Vec3::new(post_width, 3.5, 0.2);
+        let rp_size = Vec3::new(post_width + 0.1, 3.5, 0.2);
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::from_size(rp_size))),
             MeshMaterial3d(wall_material.clone()),
@@ -283,36 +337,40 @@ fn spawn_window_wall(
                 pos + Vec3::new(cell_size * 0.5 - post_width * 0.5, 0.0, 0.0),
             ),
             WallCollider {
-                half_extents: rp_size * 0.5,
+                half_extents: Vec3::new((post_width + 0.1) * 0.5, 1.75, 0.35),
             },
             HouseMarker,
             PlayModeEntity,
         ));
-        // Bottom post (width 1.4, height 1.0)
+        // Bottom post
         let bp_size = Vec3::new(window_width, 1.0, 0.2);
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::from_size(bp_size))),
             MeshMaterial3d(wall_material.clone()),
             Transform::from_translation(pos + Vec3::new(0.0, -1.25, 0.0)),
-            WallCollider {
-                half_extents: bp_size * 0.5,
-            },
             HouseMarker,
             PlayModeEntity,
         ));
-        // Top post (width 1.4, height 1.0)
+        // Top post
         let tp_size = Vec3::new(window_width, 1.0, 0.2);
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::from_size(tp_size))),
             MeshMaterial3d(wall_material.clone()),
             Transform::from_translation(pos + Vec3::new(0.0, 1.25, 0.0)),
+            HouseMarker,
+            PlayModeEntity,
+        ));
+        // Window opening barrier collider (prevents walking through window)
+        commands.spawn((
+            Transform::from_translation(pos),
             WallCollider {
-                half_extents: tp_size * 0.5,
+                half_extents: Vec3::new(window_width * 0.5, 1.75, 0.35),
             },
             HouseMarker,
             PlayModeEntity,
         ));
-        // 3 Vertical iron bars (height 1.5, in the opening)
+
+        // 3 Vertical iron bars
         let bar_mesh = meshes.add(Cylinder::new(0.02, 1.5));
         for &offset_x in &[-0.35, 0.0, 0.35] {
             commands.spawn((
@@ -324,9 +382,8 @@ fn spawn_window_wall(
             ));
         }
     } else {
-        // Vertical window wall (along Z)
         // Left post (along negative Z)
-        let lp_size = Vec3::new(0.2, 3.5, post_width);
+        let lp_size = Vec3::new(0.2, 3.5, post_width + 0.1);
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::from_size(lp_size))),
             MeshMaterial3d(wall_material.clone()),
@@ -334,13 +391,13 @@ fn spawn_window_wall(
                 pos + Vec3::new(0.0, 0.0, -(cell_size * 0.5 - post_width * 0.5)),
             ),
             WallCollider {
-                half_extents: lp_size * 0.5,
+                half_extents: Vec3::new(0.35, 1.75, (post_width + 0.1) * 0.5),
             },
             HouseMarker,
             PlayModeEntity,
         ));
         // Right post (along positive Z)
-        let rp_size = Vec3::new(0.2, 3.5, post_width);
+        let rp_size = Vec3::new(0.2, 3.5, post_width + 0.1);
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::from_size(rp_size))),
             MeshMaterial3d(wall_material.clone()),
@@ -348,7 +405,7 @@ fn spawn_window_wall(
                 pos + Vec3::new(0.0, 0.0, cell_size * 0.5 - post_width * 0.5),
             ),
             WallCollider {
-                half_extents: rp_size * 0.5,
+                half_extents: Vec3::new(0.35, 1.75, (post_width + 0.1) * 0.5),
             },
             HouseMarker,
             PlayModeEntity,
@@ -359,9 +416,6 @@ fn spawn_window_wall(
             Mesh3d(meshes.add(Cuboid::from_size(bp_size))),
             MeshMaterial3d(wall_material.clone()),
             Transform::from_translation(pos + Vec3::new(0.0, -1.25, 0.0)),
-            WallCollider {
-                half_extents: bp_size * 0.5,
-            },
             HouseMarker,
             PlayModeEntity,
         ));
@@ -371,13 +425,20 @@ fn spawn_window_wall(
             Mesh3d(meshes.add(Cuboid::from_size(tp_size))),
             MeshMaterial3d(wall_material.clone()),
             Transform::from_translation(pos + Vec3::new(0.0, 1.25, 0.0)),
+            HouseMarker,
+            PlayModeEntity,
+        ));
+        // Window opening barrier collider (prevents walking through window)
+        commands.spawn((
+            Transform::from_translation(pos),
             WallCollider {
-                half_extents: tp_size * 0.5,
+                half_extents: Vec3::new(0.35, 1.75, window_width * 0.5),
             },
             HouseMarker,
             PlayModeEntity,
         ));
-        // 3 Vertical iron bars (height 1.5, in the opening)
+
+        // 3 Vertical iron bars
         let bar_mesh = meshes.add(Cylinder::new(0.02, 1.5));
         for &offset_z in &[-0.35, 0.0, 0.35] {
             commands.spawn((
@@ -389,31 +450,6 @@ fn spawn_window_wall(
             ));
         }
     }
-}
-
-fn spawn_solid_wall(
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    material: &Handle<StandardMaterial>,
-    pos: Vec3,
-    is_horizontal: bool,
-    cell_size: f32,
-) {
-    let size = if is_horizontal {
-        Vec3::new(cell_size, 3.5, 0.2)
-    } else {
-        Vec3::new(0.2, 3.5, cell_size)
-    };
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::from_size(size))),
-        MeshMaterial3d(material.clone()),
-        Transform::from_translation(pos),
-        WallCollider {
-            half_extents: size * 0.5,
-        },
-        HouseMarker,
-        PlayModeEntity,
-    ));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -440,7 +476,7 @@ fn spawn_door_wall(
 
     if is_horizontal {
         // Left post
-        let lp_size = Vec3::new(post_width, 3.5, 0.2);
+        let lp_size = Vec3::new(post_width + 0.1, 3.5, 0.2);
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::from_size(lp_size))),
             MeshMaterial3d(wall_material.clone()),
@@ -448,14 +484,14 @@ fn spawn_door_wall(
                 pos + Vec3::new(-(cell_size * 0.5 - post_width * 0.5), 0.0, 0.0),
             ),
             WallCollider {
-                half_extents: lp_size * 0.5,
+                half_extents: Vec3::new((post_width + 0.1) * 0.5, 1.75, 0.35),
             },
             HouseMarker,
             PlayModeEntity,
         ));
 
         // Right post
-        let rp_size = Vec3::new(post_width, 3.5, 0.2);
+        let rp_size = Vec3::new(post_width + 0.1, 3.5, 0.2);
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::from_size(rp_size))),
             MeshMaterial3d(wall_material.clone()),
@@ -463,7 +499,7 @@ fn spawn_door_wall(
                 pos + Vec3::new(cell_size * 0.5 - post_width * 0.5, 0.0, 0.0),
             ),
             WallCollider {
-                half_extents: rp_size * 0.5,
+                half_extents: Vec3::new((post_width + 0.1) * 0.5, 1.75, 0.35),
             },
             HouseMarker,
             PlayModeEntity,
@@ -475,9 +511,6 @@ fn spawn_door_wall(
             Mesh3d(meshes.add(Cuboid::from_size(l_size))),
             MeshMaterial3d(wall_material.clone()),
             Transform::from_translation(pos + Vec3::new(0.0, 1.1, 0.0)),
-            WallCollider {
-                half_extents: l_size * 0.5,
-            },
             HouseMarker,
             PlayModeEntity,
         ));
@@ -498,9 +531,6 @@ fn spawn_door_wall(
                     closed_rot,
                     open_rot,
                 },
-                WallCollider {
-                    half_extents: Vec3::new(1.6, 1.1, 0.05), // centered at -0.8 hinge, spans from -2.4 to +0.8, covering doorway
-                },
                 HouseMarker,
                 PlayModeEntity,
                 Visibility::Visible,
@@ -508,12 +538,20 @@ fn spawn_door_wall(
             ))
             .id();
 
-        // Child visual mesh offset to the right by half door width
+        // Child visual mesh offset to the right by half door width, holding door collider
         let child_id = commands
             .spawn((
                 Mesh3d(meshes.add(Cuboid::from_size(door_size))),
                 MeshMaterial3d(door_mat),
                 Transform::from_xyz(0.8, 0.0, 0.0),
+                HouseDoor {
+                    is_open: false,
+                    closed_rot,
+                    open_rot,
+                },
+                WallCollider {
+                    half_extents: Vec3::new(0.85, 1.1, 0.35), // Centered on doorway opening, seamlessly overlaps posts
+                },
                 HouseMarker,
                 PlayModeEntity,
             ))
@@ -522,7 +560,7 @@ fn spawn_door_wall(
         commands.entity(parent_id).add_child(child_id);
     } else {
         // Vertical door wall (along Z)
-        let lp_size = Vec3::new(0.2, 3.5, post_width);
+        let lp_size = Vec3::new(0.2, 3.5, post_width + 0.1);
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::from_size(lp_size))),
             MeshMaterial3d(wall_material.clone()),
@@ -530,13 +568,13 @@ fn spawn_door_wall(
                 pos + Vec3::new(0.0, 0.0, -(cell_size * 0.5 - post_width * 0.5)),
             ),
             WallCollider {
-                half_extents: lp_size * 0.5,
+                half_extents: Vec3::new(0.35, 1.75, (post_width + 0.1) * 0.5),
             },
             HouseMarker,
             PlayModeEntity,
         ));
 
-        let rp_size = Vec3::new(0.2, 3.5, post_width);
+        let rp_size = Vec3::new(0.2, 3.5, post_width + 0.1);
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::from_size(rp_size))),
             MeshMaterial3d(wall_material.clone()),
@@ -544,7 +582,7 @@ fn spawn_door_wall(
                 pos + Vec3::new(0.0, 0.0, cell_size * 0.5 - post_width * 0.5),
             ),
             WallCollider {
-                half_extents: rp_size * 0.5,
+                half_extents: Vec3::new(0.35, 1.75, (post_width + 0.1) * 0.5),
             },
             HouseMarker,
             PlayModeEntity,
@@ -555,9 +593,6 @@ fn spawn_door_wall(
             Mesh3d(meshes.add(Cuboid::from_size(l_size))),
             MeshMaterial3d(wall_material.clone()),
             Transform::from_translation(pos + Vec3::new(0.0, 1.1, 0.0)),
-            WallCollider {
-                half_extents: l_size * 0.5,
-            },
             HouseMarker,
             PlayModeEntity,
         ));
@@ -578,9 +613,6 @@ fn spawn_door_wall(
                     closed_rot,
                     open_rot,
                 },
-                WallCollider {
-                    half_extents: Vec3::new(0.05, 1.1, 1.6), // centered at -0.8 hinge, spans Z from -2.4 to +0.8, covering doorway
-                },
                 HouseMarker,
                 PlayModeEntity,
                 Visibility::Visible,
@@ -588,12 +620,20 @@ fn spawn_door_wall(
             ))
             .id();
 
-        // Child visual mesh offset along Z by half door width
+        // Child visual mesh offset along Z by half door width, holding door collider
         let child_id = commands
             .spawn((
                 Mesh3d(meshes.add(Cuboid::from_size(door_size))),
                 MeshMaterial3d(door_mat),
                 Transform::from_xyz(0.0, 0.0, 0.8),
+                HouseDoor {
+                    is_open: false,
+                    closed_rot,
+                    open_rot,
+                },
+                WallCollider {
+                    half_extents: Vec3::new(0.35, 1.1, 0.85), // Centered on doorway opening, seamlessly overlaps posts
+                },
                 HouseMarker,
                 PlayModeEntity,
             ))
@@ -614,7 +654,7 @@ fn spawn_house(
 ) {
     *puzzle_state = HousePuzzleState::default();
 
-    let mut house_pos = Vec3::new(0.0, 1.5, 0.0);
+    let mut house_pos = Vec3::new(-35.0, 1.5, -35.0);
     for p in map.prefabs.iter() {
         if p.prefab_type == "house" {
             house_pos = Vec3::from_array(p.position);
@@ -882,6 +922,26 @@ fn spawn_house(
                             &asset_server,
                             cell_size,
                         );
+
+                        // Smooth Front Entrance Threshold Apron Ramp
+                        let ramp_pos = Vec3::new(x_center, 1.52, house_pos.z + half_d + 0.6);
+                        commands.spawn((
+                            Mesh3d(meshes.add(Cuboid::new(3.6, 0.12, 1.2))),
+                            MeshMaterial3d(materials.add(StandardMaterial {
+                                base_color: Color::srgb(0.4, 0.42, 0.45),
+                                perceptual_roughness: 0.8,
+                                ..default()
+                            })),
+                            Transform::from_translation(ramp_pos)
+                                .with_rotation(Quat::from_rotation_x(-0.08)),
+                            RigidBody::Static,
+                            Collider::cuboid(3.6, 0.12, 1.2),
+                            WallCollider {
+                                half_extents: Vec3::new(1.8, 0.06, 0.6),
+                            },
+                            HouseMarker,
+                            PlayModeEntity,
+                        ));
                     } else if cell_type == CellType::Bedroom {
                         spawn_window_wall(
                             &mut commands,
@@ -948,6 +1008,9 @@ fn spawn_house(
         })),
         Transform::from_xyz(nw_x, house_pos.y + 1.0, nw_z),
         InteractiveBookcase,
+        WallCollider {
+            half_extents: Vec3::new(0.1, 0.15, 0.2),
+        },
         HouseMarker,
         PlayModeEntity,
     ));
@@ -989,21 +1052,40 @@ fn spawn_house(
         PlayModeEntity,
     ));
 
-    // Basement descent portal (Ground Floor Foyer -> Basement)
-    let foyer_portal_x = house_pos.x + 3.5;
-    let foyer_portal_z = house_pos.z + 2.5;
+    // -----------------------------------------------------------------
+    // INDUSTRIAL ELEVATOR LIFT (Ground Floor Foyer -> Basement)
+    // -----------------------------------------------------------------
+    let portal_c = 4;
+    let portal_r = 1;
+    let foyer_portal_x = house_pos.x - half_w + (portal_c as f32 + 0.5) * cell_size;
+    let foyer_portal_z = house_pos.z - half_d + (portal_r as f32 + 0.5) * cell_size;
+
+    // Elevator Steel Deck Floor
     commands.spawn((
-        Mesh3d(meshes.add(Sphere::new(0.4).mesh().ico(3).unwrap())),
+        Mesh3d(meshes.add(Cuboid::new(2.4, 0.1, 2.4))),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgba(0.1, 0.8, 0.5, 0.6),
-            alpha_mode: AlphaMode::Blend,
-            emissive: LinearRgba::from(Color::srgb(0.05, 0.4, 0.2)),
+            base_color: Color::srgb(0.25, 0.28, 0.32),
+            metallic: 0.9,
+            perceptual_roughness: 0.3,
             ..default()
         })),
-        Transform::from_xyz(foyer_portal_x, house_pos.y + 0.7, foyer_portal_z),
+        Transform::from_xyz(foyer_portal_x, house_pos.y + 0.05, foyer_portal_z),
+        HouseMarker,
+        PlayModeEntity,
+    ));
+
+    // Elevator Control Panel Console
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(0.3, 0.5, 0.1))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.1, 0.8, 0.4),
+            emissive: LinearRgba::from(Color::srgb(0.2, 2.0, 1.0)),
+            ..default()
+        })),
+        Transform::from_xyz(foyer_portal_x, house_pos.y + 0.9, foyer_portal_z),
         Teleporter {
-            target_pos: Vec3::new(foyer_portal_x, -48.2, foyer_portal_z),
-            message: "🕳 Entering Basement Cellar...".to_string(),
+            target_pos: Vec3::new(house_pos.x - 14.0, -49.0, house_pos.z + 5.0),
+            message: "🛗 Elevator descending to Research Complex Basement...".to_string(),
         },
         HouseMarker,
         PlayModeEntity,
@@ -1015,8 +1097,11 @@ fn spawn_house(
     commands.spawn((
         Mesh3d(meshes.add(Cuboid::new(0.8, 0.6, 0.6))),
         MeshMaterial3d(gold_mat.clone()),
-        Transform::from_xyz(se_x, house_pos.y + 4.15, se_z),
+        Transform::from_xyz(se_x, house_pos.y + 3.65, se_z),
         PuzzleChest { is_locked: true },
+        WallCollider {
+            half_extents: Vec3::new(0.4, 0.3, 0.3),
+        },
         HouseMarker,
         PlayModeEntity,
     ));
@@ -1091,19 +1176,52 @@ fn spawn_house(
         PlayModeEntity,
     ));
 
-    // Basement ascent portal
+    // -----------------------------------------------------------------
+    // BASEMENT ELEVATOR LIFT (Spacious SW Bay -> Ground Floor Foyer)
+    // -----------------------------------------------------------------
+    let basement_lift_x = house_pos.x - 14.0;
+    let basement_lift_z = house_pos.z + 5.0;
+
+    // High-Tech Industrial Elevator Shaft Wall Frame
     commands.spawn((
-        Mesh3d(meshes.add(Sphere::new(0.4).mesh().ico(3).unwrap())),
+        Mesh3d(meshes.add(Cuboid::new(3.0, 4.0, 0.2))),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgba(0.1, 0.8, 0.5, 0.6),
-            alpha_mode: AlphaMode::Blend,
-            emissive: LinearRgba::from(Color::srgb(0.05, 0.4, 0.2)),
+            base_color: Color::srgb(0.2, 0.22, 0.26),
+            metallic: 0.95,
+            perceptual_roughness: 0.2,
             ..default()
         })),
-        Transform::from_xyz(foyer_portal_x, -48.2, foyer_portal_z),
+        Transform::from_xyz(basement_lift_x, -48.0, basement_lift_z + 1.2),
+        HouseMarker,
+        PlayModeEntity,
+    ));
+
+    // Steel Lift Deck
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(2.4, 0.1, 2.4))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.25, 0.28, 0.32),
+            metallic: 0.9,
+            perceptual_roughness: 0.3,
+            ..default()
+        })),
+        Transform::from_xyz(basement_lift_x, -49.95, basement_lift_z),
+        HouseMarker,
+        PlayModeEntity,
+    ));
+
+    // Elevator Control Panel Console
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(0.3, 0.5, 0.1))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.1, 0.8, 0.4),
+            emissive: LinearRgba::from(Color::srgb(0.2, 2.0, 1.0)),
+            ..default()
+        })),
+        Transform::from_xyz(basement_lift_x, -49.1, basement_lift_z),
         Teleporter {
-            target_pos: Vec3::new(foyer_portal_x, house_pos.y + 0.7, foyer_portal_z),
-            message: "🏠 Climbing back to Ground Floor foyer...".to_string(),
+            target_pos: Vec3::new(foyer_portal_x, house_pos.y + 0.1, foyer_portal_z + 3.0),
+            message: "🛗 Elevator ascending to Ground Floor Foyer...".to_string(),
         },
         HouseMarker,
         PlayModeEntity,
@@ -1220,7 +1338,7 @@ fn spawn_house(
         })),
         Transform::from_xyz(house_pos.x, -48.2, ladder_z),
         Teleporter {
-            target_pos: Vec3::new(house_pos.x, -98.2, house_pos.z),
+            target_pos: Vec3::new(house_pos.x, -100.0, house_pos.z + 2.0),
             message: "🕯️ Descending into the Ancient Crypt...".to_string(),
         },
         HouseMarker,
@@ -1306,7 +1424,7 @@ fn spawn_house(
         })),
         Transform::from_xyz(house_pos.x, -98.2, house_pos.z - 3.5),
         Teleporter {
-            target_pos: Vec3::new(house_pos.x, -48.2, ladder_z),
+            target_pos: Vec3::new(house_pos.x, -50.0, ladder_z + 2.0),
             message: "🪜 Climbing back up to basement cellar...".to_string(),
         },
         HouseMarker,
@@ -1319,6 +1437,9 @@ fn spawn_house(
         MeshMaterial3d(basement_stone_mat.clone()),
         Transform::from_xyz(house_pos.x, -99.4, house_pos.z),
         ArtifactPedestal,
+        WallCollider {
+            half_extents: Vec3::new(0.35, 0.6, 0.35),
+        },
         HouseMarker,
         PlayModeEntity,
     ));
@@ -1391,17 +1512,14 @@ fn spawn_house(
         perceptual_roughness: 0.9,
         ..default()
     });
+    let roof_y = house_pos.y + 7.0 + (half_d * 0.5) * 0.20_f32.tan();
 
     // North slope
     commands.spawn((
         Mesh3d(mansion_roof_mesh.clone()),
         MeshMaterial3d(mansion_roof_mat.clone()),
-        Transform::from_xyz(
-            house_pos.x,
-            house_pos.y + 7.0 + 1.0,
-            house_pos.z - half_d * 0.5,
-        )
-        .with_rotation(Quat::from_rotation_x(-0.20)), // pitch up towards center
+        Transform::from_xyz(house_pos.x, roof_y, house_pos.z - half_d * 0.5)
+            .with_rotation(Quat::from_rotation_x(-0.20)), // pitch up towards center
         RigidBody::Static,
         Collider::cuboid(roof_w, 0.1, roof_slope_len),
         HouseMarker,
@@ -1412,12 +1530,8 @@ fn spawn_house(
     commands.spawn((
         Mesh3d(mansion_roof_mesh),
         MeshMaterial3d(mansion_roof_mat),
-        Transform::from_xyz(
-            house_pos.x,
-            house_pos.y + 7.0 + 1.0,
-            house_pos.z + half_d * 0.5,
-        )
-        .with_rotation(Quat::from_rotation_x(0.20)), // pitch up towards center
+        Transform::from_xyz(house_pos.x, roof_y, house_pos.z + half_d * 0.5)
+            .with_rotation(Quat::from_rotation_x(0.20)), // pitch up towards center
         RigidBody::Static,
         Collider::cuboid(roof_w, 0.1, roof_slope_len),
         HouseMarker,
@@ -1512,6 +1626,17 @@ fn spawn_house(
             -97.2,
             house_pos.z + basement_d * 0.4,
         ),
+    );
+
+    spawn_research_complex_decorations(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &asset_server,
+        house_pos,
+        half_w,
+        half_d,
+        cell_size,
     );
 }
 
@@ -1635,10 +1760,24 @@ fn house_interaction_system(
     mut crate_query: Query<(Entity, &mut PushableCrate)>,
     mut chest_query: Query<(Entity, &mut PuzzleChest, &Transform), Without<PlayModePlayer>>,
     artifact_query: Query<(Entity, &Transform), (With<RotatingArtifact>, Without<PlayModePlayer>)>,
+    terminal_query: Query<(&Transform, &ResearchTerminal), Without<PlayModePlayer>>,
+    security_query: Query<&Transform, (With<BasementSecurityConsole>, Without<PlayModePlayer>)>,
+    synth_query: Query<&Transform, (With<PlasmaSynthesizerConsole>, Without<PlayModePlayer>)>,
     map: Res<TempestMap>,
     mansion_settings: Res<MansionSettings>,
 ) {
     if !keyboard_input.just_pressed(KeyCode::KeyE) {
+        return;
+    }
+
+    // If a modal or terminal log window is open, pressing KeyE closes it!
+    if puzzle_state.active_terminal_log.is_some()
+        || puzzle_state.show_security_keypad
+        || puzzle_state.show_synthesizer_ui
+    {
+        puzzle_state.active_terminal_log = None;
+        puzzle_state.show_security_keypad = false;
+        puzzle_state.show_synthesizer_ui = false;
         return;
     }
     let Ok((_player_entity, mut player, mut player_transform, mut phys_pos)) =
@@ -1647,6 +1786,52 @@ fn house_interaction_system(
         return;
     };
     let player_pos = player.position;
+
+    // 0a. Interacting with Research Expedition Terminals
+    for (t_transform, terminal) in terminal_query.iter() {
+        let d = player_pos.xz().distance(t_transform.translation.xz());
+        let dy = (player_pos.y - t_transform.translation.y).abs();
+        if d < 2.5 && dy < 2.5 {
+            puzzle_state.active_terminal_log = Some(terminal.terminal_id);
+            crate::play_mode::inventory_log(&format!("💻 Accessing Terminal: {}", terminal.title));
+            return;
+        }
+    }
+
+    // 0b. Interacting with Basement Security Keypad Console
+    for s_transform in security_query.iter() {
+        let d = player_pos.xz().distance(s_transform.translation.xz());
+        let dy = (player_pos.y - s_transform.translation.y).abs();
+        if d < 2.5 && dy < 2.5 {
+            if puzzle_state.vault_unlocked {
+                crate::play_mode::inventory_log("🔓 Basement Vault Security is disengaged.");
+            } else {
+                puzzle_state.show_security_keypad = true;
+                puzzle_state.keypad_input.clear();
+                crate::play_mode::inventory_log(
+                    "🔒 Accessing Basement Security Override Keypad...",
+                );
+            }
+            return;
+        }
+    }
+
+    // 0c. Interacting with Plasma Synthesizer Station
+    for synth_transform in synth_query.iter() {
+        let d = player_pos.xz().distance(synth_transform.translation.xz());
+        let dy = (player_pos.y - synth_transform.translation.y).abs();
+        if d < 2.5 && dy < 2.5 {
+            if puzzle_state.vault_unlocked {
+                puzzle_state.show_synthesizer_ui = true;
+                crate::play_mode::inventory_log("🔬 Accessing Plasma Synthesizer Station...");
+            } else {
+                crate::play_mode::inventory_log(
+                    "🔒 Plasma Synthesizer offline — Vault door is locked!",
+                );
+            }
+            return;
+        }
+    }
 
     // 1. Interacting with closest door within 2.2m horizontal radius and 2.5m height tolerance
     let mut closest_door = None;
@@ -1792,4 +1977,819 @@ fn house_interaction_system(
             return;
         }
     }
+}
+
+pub fn vault_door_unlock_system(
+    mut commands: Commands,
+    puzzle_state: Res<HousePuzzleState>,
+    vault_door_query: Query<Entity, With<BasementVaultDoor>>,
+) {
+    if puzzle_state.vault_unlocked {
+        for entity in vault_door_query.iter() {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+pub fn research_complex_ui_system(
+    mut contexts: bevy_egui::EguiContexts,
+    mut puzzle_state: ResMut<HousePuzzleState>,
+    mut inventory: ResMut<PlayerInventory>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+) {
+    if keyboard_input.just_pressed(KeyCode::Escape)
+        && (puzzle_state.active_terminal_log.is_some()
+            || puzzle_state.show_security_keypad
+            || puzzle_state.show_synthesizer_ui)
+    {
+        puzzle_state.active_terminal_log = None;
+        puzzle_state.show_security_keypad = false;
+        puzzle_state.show_synthesizer_ui = false;
+        return;
+    }
+
+    // Handle physical keyboard digit entry when Security Keypad is active
+    if puzzle_state.show_security_keypad && !puzzle_state.vault_unlocked {
+        let digits = [
+            (KeyCode::Digit0, '0'),
+            (KeyCode::Numpad0, '0'),
+            (KeyCode::Digit1, '1'),
+            (KeyCode::Numpad1, '1'),
+            (KeyCode::Digit2, '2'),
+            (KeyCode::Numpad2, '2'),
+            (KeyCode::Digit3, '3'),
+            (KeyCode::Numpad3, '3'),
+            (KeyCode::Digit4, '4'),
+            (KeyCode::Numpad4, '4'),
+            (KeyCode::Digit5, '5'),
+            (KeyCode::Numpad5, '5'),
+            (KeyCode::Digit6, '6'),
+            (KeyCode::Numpad6, '6'),
+            (KeyCode::Digit7, '7'),
+            (KeyCode::Numpad7, '7'),
+            (KeyCode::Digit8, '8'),
+            (KeyCode::Numpad8, '8'),
+            (KeyCode::Digit9, '9'),
+            (KeyCode::Numpad9, '9'),
+        ];
+
+        for (key, ch) in digits {
+            if keyboard_input.just_pressed(key) && puzzle_state.keypad_input.len() < 3 {
+                puzzle_state.keypad_input.push(ch);
+            }
+        }
+
+        if keyboard_input.just_pressed(KeyCode::Backspace) {
+            puzzle_state.keypad_input.pop();
+        }
+
+        if keyboard_input.just_pressed(KeyCode::Enter)
+            || keyboard_input.just_pressed(KeyCode::NumpadEnter)
+        {
+            if puzzle_state.keypad_input == "371" {
+                puzzle_state.vault_unlocked = true;
+                puzzle_state.show_security_keypad = false;
+                crate::play_mode::inventory_log(
+                    "🔓 ACCESS GRANTED! Passcode 371 Accepted! Security Vault Blast Doors disengaged!",
+                );
+            } else if !puzzle_state.keypad_input.is_empty() {
+                crate::play_mode::inventory_log("❌ ACCESS DENIED: Invalid Passcode!");
+                puzzle_state.keypad_input.clear();
+            }
+        }
+    }
+
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
+
+    // 1. Terminal Log Window
+    if let Some(log_id) = puzzle_state.active_terminal_log {
+        let (title, text) = match log_id {
+            1 => (
+                "🔬 EXPEDITION LOG #01: ATMOSPHERIC INTERFERENCE",
+                "Survey Team Alpha - Log 104:\nAtmospheric density on this world is 4x higher than expected. Electromagnetic storms disrupt orbital communication. We have established Research Complex Alpha at grid coordinate West-Edge. Deep mineral scans indicate bioluminescent crystal deposits in the lower cave system.",
+            ),
+            2 => (
+                "🧪 RESEARCH LOG #02: FAUNA & CRYSTAL SYNTHESIS",
+                "Dr. Vance Notes:\nThe native alien species is non-hostile when unprovoked. They possess advanced trade tech. We built a Plasma Synthesizer in the Basement Vault to refine raw surface minerals into tech modules. Security Override Code is recorded in the Basement Server.",
+            ),
+            _ => (
+                "🔒 BASEMENT SECURITY OVERRIDE PASSCODE",
+                "SECURITY ALERT:\nBasement Vault locked due to grid overload. Emergency Manual Keypad Override Passcode: [ 3 - 7 - 1 ]. Enter passcode on the Security Keypad to disengage magnetic locks and access the Plasma Synthesizer.",
+            ),
+        };
+
+        let mut is_open = true;
+        egui::Window::new(title)
+            .default_width(420.0)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut is_open)
+            .show(ctx, |ui| {
+                ui.label(
+                    egui::RichText::new(text)
+                        .size(15.0)
+                        .color(egui::Color32::from_rgb(180, 230, 255)),
+                );
+                ui.add_space(14.0);
+                if ui
+                    .add_sized(
+                        [ui.available_width(), 32.0],
+                        egui::Button::new(
+                            egui::RichText::new("✖ Close Terminal Log (ESC)")
+                                .size(15.0)
+                                .strong()
+                                .color(egui::Color32::WHITE),
+                        )
+                        .fill(egui::Color32::from_rgb(180, 40, 40)),
+                    )
+                    .clicked()
+                {
+                    puzzle_state.active_terminal_log = None;
+                }
+            });
+        if !is_open {
+            puzzle_state.active_terminal_log = None;
+        }
+    }
+
+    // 2. Security Keypad Window
+    if puzzle_state.show_security_keypad && !puzzle_state.vault_unlocked {
+        let mut is_open = true;
+        egui::Window::new("🔒 BASEMENT SECURITY KEYPAD OVERRIDE")
+            .default_width(320.0)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut is_open)
+            .show(ctx, |ui| {
+                ui.label(egui::RichText::new("Type or Press 3-Digit Passcode (Clue: Terminal #03)").strong().color(egui::Color32::from_rgb(200, 220, 255)));
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Input: [ {:^3} ]",
+                            if puzzle_state.keypad_input.is_empty() {
+                                "___"
+                            } else {
+                                &puzzle_state.keypad_input
+                            }
+                        ))
+                        .size(24.0)
+                        .strong()
+                        .color(egui::Color32::from_rgb(255, 200, 80)),
+                    );
+                });
+                ui.add_space(10.0);
+
+                // 3x4 On-Screen Keypad Buttons Grid
+                egui::Grid::new("keypad_num_grid").spacing([10.0, 8.0]).show(ui, |ui| {
+                    for r in 0..3 {
+                        for c in 0..3 {
+                            let digit_num = r * 3 + c + 1;
+                            let digit_str = digit_num.to_string();
+                            if ui.add_sized([75.0, 36.0], egui::Button::new(egui::RichText::new(&digit_str).size(18.0).strong())).clicked()
+                                 && puzzle_state.keypad_input.len() < 3
+                            {
+                                puzzle_state.keypad_input.push_str(&digit_str);
+                            }
+                        }
+                        ui.end_row();
+                    }
+                    if ui.add_sized([75.0, 36.0], egui::Button::new("⌫ Clear")).clicked() {
+                        puzzle_state.keypad_input.clear();
+                    }
+                    if ui.add_sized([75.0, 36.0], egui::Button::new(egui::RichText::new("0").size(18.0).strong())).clicked()
+                        && puzzle_state.keypad_input.len() < 3
+                    {
+                        puzzle_state.keypad_input.push('0');
+                    }
+                    if ui.add_sized([75.0, 36.0], egui::Button::new(egui::RichText::new("↵ Enter").size(14.0).strong().color(egui::Color32::GREEN))).clicked() {
+                        if puzzle_state.keypad_input == "371" {
+                            puzzle_state.vault_unlocked = true;
+                            puzzle_state.show_security_keypad = false;
+                            crate::play_mode::inventory_log("🔓 ACCESS GRANTED! Passcode 371 Accepted! Security Vault Blast Doors disengaged!");
+                        } else {
+                            crate::play_mode::inventory_log("❌ ACCESS DENIED: Invalid Passcode!");
+                            puzzle_state.keypad_input.clear();
+                        }
+                    }
+                    ui.end_row();
+                });
+
+                ui.add_space(8.0);
+
+                // Auto-submit check if 3 digits entered
+                if puzzle_state.keypad_input.len() == 3 {
+                    if puzzle_state.keypad_input == "371" {
+                        puzzle_state.vault_unlocked = true;
+                        puzzle_state.show_security_keypad = false;
+                        crate::play_mode::inventory_log("🔓 ACCESS GRANTED! Passcode 371 Accepted! Security Vault Blast Doors disengaged!");
+                    } else {
+                        crate::play_mode::inventory_log("❌ ACCESS DENIED: Invalid Passcode!");
+                        puzzle_state.keypad_input.clear();
+                    }
+                }
+
+                if ui
+                    .add_sized(
+                        [ui.available_width(), 28.0],
+                        egui::Button::new(
+                            egui::RichText::new("✖ Cancel Keypad (ESC)")
+                                .size(14.0)
+                                .color(egui::Color32::WHITE),
+                        )
+                        .fill(egui::Color32::from_rgb(180, 40, 40)),
+                    )
+                    .clicked()
+                {
+                    puzzle_state.show_security_keypad = false;
+                }
+            });
+        if !is_open {
+            puzzle_state.show_security_keypad = false;
+        }
+    }
+
+    // 3. Plasma Synthesizer Window
+    if puzzle_state.show_synthesizer_ui {
+        let mut is_open = true;
+        egui::Window::new("🔬 PLASMA SYNTHESIZER STATION")
+            .default_width(400.0)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut is_open)
+            .show(ctx, |ui| {
+                ui.heading("⚡ HIGH-TECH MATERIAL SYNTHESIZER");
+                ui.label("Refine raw planet minerals into advanced components:");
+                ui.separator();
+
+                // Recipe 1
+                ui.label("🤖 Synthesize Robot Parts (Cost: 2 Stone, 1 Copper)");
+                let can_synth_1 = inventory.rock >= 2 && inventory.copper >= 1;
+                if ui
+                    .add_enabled(
+                        can_synth_1,
+                        egui::Button::new("⚡ Synthesize +1 Robot Parts"),
+                    )
+                    .clicked()
+                {
+                    inventory.rock -= 2;
+                    inventory.copper -= 1;
+                    inventory.robot_parts += 1;
+                    crate::play_mode::inventory_log("⚡ Synthesized +1 Robot Parts!");
+                }
+                ui.separator();
+
+                // Recipe 2
+                ui.label("👽 Synthesize Alien Tech (Cost: 2 Iron, 1 Crystal Shard)");
+                let can_synth_2 = inventory.iron >= 2 && inventory.crystal_shard >= 1;
+                if ui
+                    .add_enabled(
+                        can_synth_2,
+                        egui::Button::new("⚡ Synthesize +1 Alien Tech"),
+                    )
+                    .clicked()
+                {
+                    inventory.iron -= 2;
+                    inventory.crystal_shard -= 1;
+                    inventory.alien_tech += 1;
+                    crate::play_mode::inventory_log("⚡ Synthesized +1 Alien Tech!");
+                }
+                ui.separator();
+
+                if ui
+                    .add_sized(
+                        [ui.available_width(), 30.0],
+                        egui::Button::new(
+                            egui::RichText::new("✖ Close Synthesizer (E / ESC)")
+                                .size(15.0)
+                                .strong()
+                                .color(egui::Color32::WHITE),
+                        )
+                        .fill(egui::Color32::from_rgb(180, 40, 40)),
+                    )
+                    .clicked()
+                {
+                    puzzle_state.show_synthesizer_ui = false;
+                }
+            });
+        if !is_open {
+            puzzle_state.show_synthesizer_ui = false;
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_research_complex_decorations(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    asset_server: &Res<AssetServer>,
+    house_pos: Vec3,
+    _half_w: f32,
+    _half_d: f32,
+    _cell_size: f32,
+) {
+    // Colors & Materials
+    let _metal_dark = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.2, 0.22, 0.25),
+        metallic: 0.8,
+        perceptual_roughness: 0.4,
+        ..default()
+    });
+    let screen_cyan = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.1, 0.9, 1.0),
+        emissive: LinearRgba::from(Color::srgb(0.2, 2.5, 3.5)),
+        ..default()
+    });
+    let screen_red = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.2, 0.2),
+        emissive: LinearRgba::from(Color::srgb(3.0, 0.4, 0.4)),
+        ..default()
+    });
+    let lab_green = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.2, 1.0, 0.4),
+        emissive: LinearRgba::from(Color::srgb(0.4, 2.5, 0.8)),
+        ..default()
+    });
+
+    // Asset scenes
+    let desk_scene = asset_server.load("Prop_Desk_L.gltf#Scene0");
+    let chair_scene = asset_server.load("Prop_Chair.gltf#Scene0");
+    let chest_scene = asset_server.load("Prop_Chest.gltf#Scene0");
+    let crate_scene = asset_server.load("Prop_Crate_Large.gltf#Scene0");
+    let health_scene = asset_server.load("Prop_HealthPack.gltf#Scene0");
+
+    // -----------------------------------------------------------------
+    // 1. COMMAND & CONTROL FOYER (Ground Floor Center)
+    // -----------------------------------------------------------------
+    let desk_pos = house_pos + Vec3::new(-3.5, 0.05, -2.5);
+    // 3D L-Shaped Executive Desk
+    commands.spawn((
+        WorldAssetRoot(desk_scene.clone()),
+        Transform::from_translation(desk_pos)
+            .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
+        WallCollider {
+            half_extents: Vec3::new(0.9, 0.45, 0.6),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    // 3D Office Swivel Chair
+    commands.spawn((
+        WorldAssetRoot(chair_scene.clone()),
+        Transform::from_translation(desk_pos + Vec3::new(0.0, 0.0, 1.2))
+            .with_rotation(Quat::from_rotation_y(0.0)),
+        WallCollider {
+            half_extents: Vec3::new(0.35, 0.45, 0.35),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    // Holographic Monitor Screen Console (Elevated to sit cleanly on top of desk)
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(0.9, 0.4, 0.05))),
+        MeshMaterial3d(screen_cyan.clone()),
+        Transform::from_translation(desk_pos + Vec3::new(0.0, 1.15, -0.2)),
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    // Terminal 1 (Expedition Log #01)
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(0.4, 0.3, 0.4))),
+        MeshMaterial3d(screen_cyan.clone()),
+        Transform::from_translation(desk_pos + Vec3::new(0.7, 1.05, -0.1)),
+        ResearchTerminal {
+            terminal_id: 1,
+            title: "🔬 EXPEDITION LOG #01: ATMOSPHERIC INTERFERENCE".to_string(),
+            log_text: "Survey Team Alpha - Log 104:\nAtmospheric density on this world is 4x higher than expected. Electromagnetic storms disrupt orbital communication. We have established Research Complex Alpha at grid coordinate West-Edge. Deep mineral scans indicate bioluminescent crystal deposits in the lower cave system.".to_string(),
+        },
+        WallCollider {
+            half_extents: Vec3::new(0.2, 0.15, 0.2),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    // Foyer Supply Crates (Positioned deep inside East & West rooms against outer walls)
+    commands.spawn((
+        WorldAssetRoot(crate_scene.clone()),
+        Transform::from_translation(house_pos + Vec3::new(12.5, 0.05, 6.0)),
+        WallCollider {
+            half_extents: Vec3::new(0.5, 0.45, 0.5),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    commands.spawn((
+        WorldAssetRoot(crate_scene.clone()),
+        Transform::from_translation(house_pos + Vec3::new(-12.5, 0.05, 6.0)),
+        WallCollider {
+            half_extents: Vec3::new(0.5, 0.45, 0.5),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+
+    // -----------------------------------------------------------------
+    // 2. BIOCHEMICAL LABORATORY ROOM (Ground Floor West Room next to Stairs)
+    // -----------------------------------------------------------------
+    let lab_pos = house_pos + Vec3::new(-13.5, 0.05, 2.0);
+    // Lab Workbench Desk inside West room
+    commands.spawn((
+        WorldAssetRoot(desk_scene.clone()),
+        Transform::from_translation(lab_pos)
+            .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)),
+        WallCollider {
+            half_extents: Vec3::new(0.6, 0.45, 0.9),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    // Lab Swivel Chair inside West room
+    commands.spawn((
+        WorldAssetRoot(chair_scene.clone()),
+        Transform::from_translation(lab_pos + Vec3::new(-1.2, 0.0, 0.0))
+            .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)),
+        WallCollider {
+            half_extents: Vec3::new(0.35, 0.45, 0.35),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    // Emergency Medical Health Pack on Workbench
+    commands.spawn((
+        WorldAssetRoot(health_scene.clone()),
+        Transform::from_translation(lab_pos + Vec3::new(-0.2, 0.95, 0.2)),
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    // Glowing Liquid Canister on Workbench
+    commands.spawn((
+        Mesh3d(meshes.add(Cylinder::new(0.15, 0.4))),
+        MeshMaterial3d(lab_green.clone()),
+        Transform::from_translation(lab_pos + Vec3::new(-0.2, 1.10, -0.4)),
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    // Terminal 2 (Expedition Log #02) on Lab Workbench
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(0.4, 0.3, 0.4))),
+        MeshMaterial3d(screen_cyan.clone()),
+        Transform::from_translation(lab_pos + Vec3::new(0.2, 1.05, 0.4)),
+        ResearchTerminal {
+            terminal_id: 2,
+            title: "🧪 RESEARCH LOG #02: FAUNA & CRYSTAL SYNTHESIS".to_string(),
+            log_text: "Dr. Vance Notes:\nThe native alien species is non-hostile when unprovoked. They possess advanced trade tech. We built a Plasma Synthesizer in the Basement Vault to refine raw surface minerals into tech modules. Security Override Code is recorded in the Basement Server.".to_string(),
+        },
+        WallCollider {
+            half_extents: Vec3::new(0.2, 0.15, 0.2),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+
+    // -----------------------------------------------------------------
+    // 3. NORTH-WEST OFFICE ROOM (Ground Floor NW Corner)
+    // -----------------------------------------------------------------
+    let office_pos = house_pos + Vec3::new(-15.0, 0.05, -6.0);
+    // Executive Desk
+    commands.spawn((
+        WorldAssetRoot(desk_scene.clone()),
+        Transform::from_translation(office_pos).with_rotation(Quat::from_rotation_y(0.0)),
+        WallCollider {
+            half_extents: Vec3::new(0.9, 0.45, 0.6),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    // Executive Swivel Chair
+    commands.spawn((
+        WorldAssetRoot(chair_scene.clone()),
+        Transform::from_translation(office_pos + Vec3::new(0.0, 0.0, 1.2))
+            .with_rotation(Quat::from_rotation_y(0.0)),
+        WallCollider {
+            half_extents: Vec3::new(0.35, 0.45, 0.35),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    // Storage Chest in Office
+    commands.spawn((
+        WorldAssetRoot(chest_scene.clone()),
+        Transform::from_translation(office_pos + Vec3::new(2.5, 0.0, -0.5))
+            .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
+        WallCollider {
+            half_extents: Vec3::new(0.35, 0.35, 0.5),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+
+    // -----------------------------------------------------------------
+    // 3b. EAST ARMORY & WORKSHOP ROOM (Ground Floor East Room)
+    // -----------------------------------------------------------------
+    let armory_pos = house_pos + Vec3::new(11.5, 0.05, 2.0);
+    commands.spawn((
+        WorldAssetRoot(desk_scene.clone()),
+        Transform::from_translation(armory_pos)
+            .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
+        WallCollider {
+            half_extents: Vec3::new(0.6, 0.45, 0.9),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    commands.spawn((
+        WorldAssetRoot(chair_scene.clone()),
+        Transform::from_translation(armory_pos + Vec3::new(-1.2, 0.0, 0.0))
+            .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)),
+        WallCollider {
+            half_extents: Vec3::new(0.35, 0.45, 0.35),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    commands.spawn((
+        WorldAssetRoot(chest_scene.clone()),
+        Transform::from_translation(armory_pos + Vec3::new(0.0, 0.0, -2.2))
+            .with_rotation(Quat::from_rotation_y(0.0)),
+        WallCollider {
+            half_extents: Vec3::new(0.5, 0.35, 0.35),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    commands.spawn((
+        WorldAssetRoot(crate_scene.clone()),
+        Transform::from_translation(armory_pos + Vec3::new(1.8, 0.05, 1.8)),
+        WallCollider {
+            half_extents: Vec3::new(0.5, 0.45, 0.5),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    commands.spawn((
+        WorldAssetRoot(health_scene.clone()),
+        Transform::from_translation(armory_pos + Vec3::new(0.2, 0.95, -0.2)),
+        HouseMarker,
+        PlayModeEntity,
+    ));
+
+    // -----------------------------------------------------------------
+    // 3c. NORTH-EAST CONTROL SUITE (Ground Floor NE Corner)
+    // -----------------------------------------------------------------
+    let ne_control_pos = house_pos + Vec3::new(14.0, 0.05, -7.5);
+    commands.spawn((
+        WorldAssetRoot(desk_scene.clone()),
+        Transform::from_translation(ne_control_pos + Vec3::new(0.0, 0.0, -0.8))
+            .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
+        WallCollider {
+            half_extents: Vec3::new(0.9, 0.45, 0.6),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    commands.spawn((
+        WorldAssetRoot(chair_scene.clone()),
+        Transform::from_translation(ne_control_pos + Vec3::new(0.0, 0.0, 0.5))
+            .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
+        WallCollider {
+            half_extents: Vec3::new(0.35, 0.45, 0.35),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    commands.spawn((
+        WorldAssetRoot(crate_scene.clone()),
+        Transform::from_translation(ne_control_pos + Vec3::new(3.2, 0.05, -1.0)),
+        WallCollider {
+            half_extents: Vec3::new(0.5, 0.45, 0.5),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+
+    // -----------------------------------------------------------------
+    // 4. LIVING QUARTERS BARRACKS (First Floor West)
+    // -----------------------------------------------------------------
+    let bed_pos = house_pos + Vec3::new(-5.0, 3.55, -2.0);
+    // Equipment Storage Chest at bed foot
+    commands.spawn((
+        WorldAssetRoot(chest_scene.clone()),
+        Transform::from_translation(bed_pos + Vec3::new(0.0, 0.0, 1.8))
+            .with_rotation(Quat::from_rotation_y(0.0)),
+        WallCollider {
+            half_extents: Vec3::new(0.5, 0.35, 0.35),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    // Barracks Rest Chair
+    commands.spawn((
+        WorldAssetRoot(chair_scene.clone()),
+        Transform::from_translation(bed_pos + Vec3::new(-2.0, 0.0, 0.0))
+            .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
+        WallCollider {
+            half_extents: Vec3::new(0.35, 0.45, 0.35),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    // Barracks Health Pack
+    commands.spawn((
+        WorldAssetRoot(health_scene.clone()),
+        Transform::from_translation(bed_pos + Vec3::new(-1.8, 0.1, 1.2)),
+        HouseMarker,
+        PlayModeEntity,
+    ));
+
+    // -----------------------------------------------------------------
+    // 4b. MASTER EXECUTIVE SUITE (First Floor East)
+    // -----------------------------------------------------------------
+    let east_suite_pos = house_pos + Vec3::new(8.5, 3.55, -2.0);
+    commands.spawn((
+        WorldAssetRoot(desk_scene.clone()),
+        Transform::from_translation(east_suite_pos)
+            .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
+        WallCollider {
+            half_extents: Vec3::new(0.9, 0.45, 0.6),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    commands.spawn((
+        WorldAssetRoot(chair_scene.clone()),
+        Transform::from_translation(east_suite_pos + Vec3::new(0.0, 0.0, -1.2))
+            .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
+        WallCollider {
+            half_extents: Vec3::new(0.35, 0.45, 0.35),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    commands.spawn((
+        WorldAssetRoot(chest_scene.clone()),
+        Transform::from_translation(east_suite_pos + Vec3::new(2.2, 0.0, 0.0))
+            .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)),
+        WallCollider {
+            half_extents: Vec3::new(0.35, 0.35, 0.5),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    commands.spawn((
+        WorldAssetRoot(health_scene.clone()),
+        Transform::from_translation(east_suite_pos + Vec3::new(-0.4, 0.95, 0.1)),
+        HouseMarker,
+        PlayModeEntity,
+    ));
+
+    // -----------------------------------------------------------------
+    // 4c. OBSERVATORY BALCONY (First Floor North)
+    // -----------------------------------------------------------------
+    let balcony_pos = house_pos + Vec3::new(0.0, 3.55, -8.5);
+    commands.spawn((
+        WorldAssetRoot(desk_scene.clone()),
+        Transform::from_translation(balcony_pos).with_rotation(Quat::from_rotation_y(0.0)),
+        WallCollider {
+            half_extents: Vec3::new(0.9, 0.45, 0.6),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    commands.spawn((
+        WorldAssetRoot(chair_scene.clone()),
+        Transform::from_translation(balcony_pos + Vec3::new(-1.2, 0.0, 0.0))
+            .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
+        WallCollider {
+            half_extents: Vec3::new(0.35, 0.45, 0.35),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    commands.spawn((
+        WorldAssetRoot(chair_scene.clone()),
+        Transform::from_translation(balcony_pos + Vec3::new(1.2, 0.0, 0.0))
+            .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)),
+        WallCollider {
+            half_extents: Vec3::new(0.35, 0.45, 0.35),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+
+    // -----------------------------------------------------------------
+    // 5. BASEMENT VAULT & GENERATOR ROOM (Y = -50.0)
+    // -----------------------------------------------------------------
+    let vault_center = Vec3::new(house_pos.x + 6.0, -50.0, house_pos.z - 4.0);
+
+    // Heavy Metal Cargo Crates Stack inside Inner Vault Chamber (Far East corner)
+    commands.spawn((
+        WorldAssetRoot(crate_scene.clone()),
+        Transform::from_translation(vault_center + Vec3::new(4.2, 0.05, 3.2)),
+        WallCollider {
+            half_extents: Vec3::new(0.5, 0.45, 0.5),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    commands.spawn((
+        WorldAssetRoot(crate_scene.clone()),
+        Transform::from_translation(vault_center + Vec3::new(4.2, 0.85, 3.2)),
+        WallCollider {
+            half_extents: Vec3::new(0.5, 0.45, 0.5),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+    commands.spawn((
+        WorldAssetRoot(crate_scene.clone()),
+        Transform::from_translation(vault_center + Vec3::new(4.2, 0.05, -3.2)),
+        WallCollider {
+            half_extents: Vec3::new(0.5, 0.45, 0.5),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+
+    // Heavy Vault Equipment Chest inside Basement
+    commands.spawn((
+        WorldAssetRoot(chest_scene.clone()),
+        Transform::from_translation(vault_center + Vec3::new(4.2, 0.05, -1.5))
+            .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)),
+        WallCollider {
+            half_extents: Vec3::new(0.35, 0.35, 0.5),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+
+    // Locked Security Blast Door
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(0.3, 3.5, 3.2))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.35, 0.38, 0.42),
+            metallic: 0.95,
+            perceptual_roughness: 0.2,
+            ..default()
+        })),
+        Transform::from_translation(vault_center + Vec3::new(-2.0, 2.0, 0.0)),
+        BasementVaultDoor,
+        WallCollider {
+            half_extents: Vec3::new(0.15, 1.75, 1.6),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+
+    // Security Keypad Terminal Console (Uncluttered, mounted on wall pillar next to Blast Door)
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(0.4, 0.6, 0.4))),
+        MeshMaterial3d(screen_red.clone()),
+        Transform::from_translation(vault_center + Vec3::new(-2.6, 1.5, -2.5)),
+        BasementSecurityConsole,
+        WallCollider {
+            half_extents: Vec3::new(0.2, 0.3, 0.2),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+
+    // Terminal 3 (Log #03 - Code Clue)
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(0.4, 0.5, 0.4))),
+        MeshMaterial3d(screen_cyan.clone()),
+        Transform::from_translation(vault_center + Vec3::new(-2.6, 1.5, 2.5)),
+        ResearchTerminal {
+            terminal_id: 3,
+            title: "🔒 BASEMENT SECURITY OVERRIDE PASSCODE".to_string(),
+            log_text: "SECURITY ALERT:\nBasement Vault locked due to grid overload. Emergency Manual Keypad Override Passcode: [ 3 - 7 - 1 ]. Enter passcode on the Security Keypad to disengage magnetic locks and access the Plasma Synthesizer.".to_string(),
+        },
+        WallCollider {
+            half_extents: Vec3::new(0.2, 0.25, 0.2),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
+
+    // Plasma Synthesizer Station inside Vault Chamber
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(1.4, 1.2, 1.4))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.1, 0.7, 0.9),
+            emissive: LinearRgba::from(Color::srgb(0.5, 3.0, 4.0)),
+            ..default()
+        })),
+        Transform::from_translation(vault_center + Vec3::new(2.5, 1.2, 0.0)),
+        PlasmaSynthesizerConsole,
+        WallCollider {
+            half_extents: Vec3::new(0.7, 0.6, 0.7),
+        },
+        HouseMarker,
+        PlayModeEntity,
+    ));
 }

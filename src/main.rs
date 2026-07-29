@@ -26,6 +26,8 @@ mod map_editor;
 mod play_mode;
 mod procedural_walls;
 mod sprite_editor;
+mod water;
+mod water_gpu;
 
 #[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AppState {
@@ -47,6 +49,7 @@ fn main() {
 
     App::new()
         .insert_resource(TokioRuntime(handle))
+        .add_systems(Startup, setup_cluster_settings)
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Tempest Rising".into(),
@@ -64,6 +67,7 @@ fn main() {
             character_designer::CharacterDesignerPlugin,
             play_mode::PlayModePlugin,
             procedural_walls::ProceduralWallsPlugin,
+            water::WaterPlugin,
         ))
         .add_plugins((
             PhysicsPlugins::default(),
@@ -132,4 +136,13 @@ fn main_menu_ui(
                 next_state.set(AppState::PlayMode);
             }
         });
+}
+
+fn setup_cluster_settings(
+    cluster_settings: Option<ResMut<bevy::light::cluster::GlobalClusterSettings>>,
+) {
+    if let Some(mut cs) = cluster_settings {
+        // Disable GPU clustering on Metal/wgpu to prevent GPU staging buffer DeviceLost panics with many light sources
+        cs.gpu_clustering = None;
+    }
 }

@@ -55,6 +55,7 @@ pub enum SculptTool {
     PlaceShrub,
     PlaceCactus,
     PlaceRock,
+    PlaceCaveEntrance,
     PlaceSpawnPoint,
     PlaceHouse,
     PlaceOreCopper,
@@ -236,8 +237,8 @@ pub struct SplatmapSettings {
 impl Default for SplatmapSettings {
     fn default() -> Self {
         Self {
-            sand_height: 1.2,
-            snow_height: 8.0,
+            sand_height: 1.5,
+            snow_height: 24.0,
             cliff_steepness: 0.75,
             biome: Biome::Temperate,
         }
@@ -251,7 +252,7 @@ pub struct WaterSettings {
 
 impl Default for WaterSettings {
     fn default() -> Self {
-        Self { height: 1.0 }
+        Self { height: 1.2 }
     }
 }
 
@@ -269,11 +270,11 @@ impl Default for NoiseSettings {
     fn default() -> Self {
         Self {
             seed: 1337,
-            frequency: 0.04,
+            frequency: 0.03,
             octaves: 4,
-            amplitude: 10.0,
+            amplitude: 8.0,
             ridge_exponent: 1.0,
-            height_offset: 3.5,
+            height_offset: 0.0,
         }
     }
 }
@@ -300,6 +301,7 @@ pub struct BiomeSelection {
     pub tundra: bool,
     pub arctic: bool,
     pub make_island: bool,
+    pub generate_caves: bool,
 }
 
 impl Default for BiomeSelection {
@@ -310,6 +312,7 @@ impl Default for BiomeSelection {
             tundra: true,
             arctic: true,
             make_island: true,
+            generate_caves: true,
         }
     }
 }
@@ -462,7 +465,6 @@ impl Plugin for MapEditorPlugin {
                     camera_controller.run_if(in_state(AppState::MapEditor)),
                     terrain_sculpting_system.run_if(in_state(AppState::MapEditor)),
                     water_simulation_system.run_if(in_state(AppState::MapEditor)),
-                    animate_water_mesh_system.run_if(in_state(AppState::MapEditor)),
                     configure_terrain_sampler_system.run_if(in_state(AppState::MapEditor)),
                 ),
             )
@@ -608,10 +610,79 @@ pub fn rebuild_terrain_mesh(
     map: &TempestMap,
     settings: &SplatmapSettings,
     meshes: &mut Assets<Mesh>,
+    mesh_handle: Option<&Mesh3d>,
 ) {
+    if let Some(h) = mesh_handle
+        && let Some(mut mesh) = meshes.get_mut(&h.0)
+    {
+        update_terrain_mesh_in_place(&mut mesh, map, settings);
+        return;
+    }
     let new_mesh = generate_terrain_mesh(map, settings);
     let new_handle = meshes.add(new_mesh);
     commands.entity(entity).insert(Mesh3d(new_handle));
+}
+
+pub fn update_terrain_mesh_in_place(
+    mesh: &mut Mesh,
+    map: &TempestMap,
+    settings: &SplatmapSettings,
+) {
+    let w = map.width;
+    let h = map.height;
+    let offset_x = -(w as f32) / 2.0;
+    let offset_z = -(h as f32) / 2.0;
+
+    let total = (w * h) as usize;
+    let mut positions = Vec::with_capacity(total);
+    let mut normals = vec![[0.0, 1.0, 0.0]; total];
+    let mut colors = Vec::with_capacity(total);
+
+    for z in 0..h {
+        for x in 0..w {
+            let y = map.get_height(x, z);
+            positions.push([x as f32 + offset_x, y, z as f32 + offset_z]);
+        }
+    }
+
+    for z in 0..h {
+        for x in 0..w {
+            let y = map.get_height(x, z);
+            let y_l = if x > 0 { map.get_height(x - 1, z) } else { y };
+            let y_r = if x < w - 1 {
+                map.get_height(x + 1, z)
+            } else {
+                y
+            };
+            let y_u = if z > 0 { map.get_height(x, z - 1) } else { y };
+            let y_d = if z < h - 1 {
+                map.get_height(x, z + 1)
+            } else {
+                y
+            };
+
+            let normal = Vec3::new(y_l - y_r, 2.0, y_u - y_d).normalize();
+            let idx = (z * w + x) as usize;
+            normals[idx] = [normal.x, normal.y, normal.z];
+
+            let vx = x as f32 + offset_x;
+            let vz = z as f32 + offset_z;
+            let color = compute_vertex_color(
+                vx,
+                y,
+                vz,
+                normal.y,
+                settings,
+                map.get_biome(x, z),
+                map.get_road(x, z),
+            );
+            colors.push(color);
+        }
+    }
+
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
 }
 
 pub fn generate_terrain_mesh(map: &TempestMap, settings: &SplatmapSettings) -> Mesh {
@@ -1123,6 +1194,109 @@ pub fn spawn_prefab_visuals_children(
                 .id();
 
             commands.entity(parent).add_child(marker);
+        }
+        "cave_entrance" => {
+            let rock_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.22, 0.25, 0.22),
+                base_color_texture: Some(asset_server.load("textures/rock.png")),
+                perceptual_roughness: 0.92,
+                metallic: 0.05,
+                ..default()
+            });
+
+            let dark_interior_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.04, 0.04, 0.06),
+                perceptual_roughness: 0.99,
+                ..default()
+            });
+
+            let portal_mat = materials.add(StandardMaterial {
+                base_color: Color::srgba(0.2, 0.8, 1.0, 0.6),
+                emissive: LinearRgba::new(0.5, 2.5, 4.0, 1.0),
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            });
+
+            let boulder_mesh = meshes.add(Sphere::new(1.0).mesh().ico(3).unwrap());
+
+            // Dark cavern interior backdrop
+            let interior = commands
+                .spawn((
+                    Mesh3d(boulder_mesh.clone()),
+                    MeshMaterial3d(dark_interior_mat),
+                    Transform::from_xyz(0.0, 1.6, -0.4).with_scale(Vec3::new(1.6, 1.4, 1.0)),
+                    MapEditorEntity,
+                ))
+                .id();
+
+            // Surrounding natural rock formations
+            let r1 = commands
+                .spawn((
+                    Mesh3d(boulder_mesh.clone()),
+                    MeshMaterial3d(rock_mat.clone()),
+                    Transform::from_xyz(-1.6, 1.2, -0.2)
+                        .with_scale(Vec3::new(1.4, 1.8, 1.3))
+                        .with_rotation(Quat::from_rotation_y(0.4)),
+                    MapEditorEntity,
+                ))
+                .id();
+            let r2 = commands
+                .spawn((
+                    Mesh3d(boulder_mesh.clone()),
+                    MeshMaterial3d(rock_mat.clone()),
+                    Transform::from_xyz(1.6, 1.3, -0.2)
+                        .with_scale(Vec3::new(1.5, 1.9, 1.4))
+                        .with_rotation(Quat::from_rotation_y(-0.5)),
+                    MapEditorEntity,
+                ))
+                .id();
+            let r3 = commands
+                .spawn((
+                    Mesh3d(boulder_mesh.clone()),
+                    MeshMaterial3d(rock_mat.clone()),
+                    Transform::from_xyz(0.0, 3.1, 0.1)
+                        .with_scale(Vec3::new(2.2, 1.3, 1.5))
+                        .with_rotation(Quat::from_rotation_z(0.1)),
+                    MapEditorEntity,
+                ))
+                .id();
+            let r4 = commands
+                .spawn((
+                    Mesh3d(boulder_mesh.clone()),
+                    MeshMaterial3d(rock_mat.clone()),
+                    Transform::from_xyz(-2.2, 0.6, 0.4).with_scale(Vec3::new(1.0, 0.9, 1.1)),
+                    MapEditorEntity,
+                ))
+                .id();
+            let r5 = commands
+                .spawn((
+                    Mesh3d(boulder_mesh.clone()),
+                    MeshMaterial3d(rock_mat),
+                    Transform::from_xyz(2.1, 0.7, 0.5).with_scale(Vec3::new(1.1, 1.0, 1.0)),
+                    MapEditorEntity,
+                ))
+                .id();
+
+            // Glowing Cave Portal Ring
+            let ring = commands
+                .spawn((
+                    Mesh3d(meshes.add(Torus::new(0.15, 1.3).mesh())),
+                    MeshMaterial3d(portal_mat),
+                    Transform::from_xyz(0.0, 1.6, 0.1)
+                        .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                    MapEditorEntity,
+                ))
+                .id();
+
+            commands
+                .entity(parent)
+                .add_child(interior)
+                .add_child(r1)
+                .add_child(r2)
+                .add_child(r3)
+                .add_child(r4)
+                .add_child(r5)
+                .add_child(ring);
         }
         "house" => {
             let width = mansion_settings.cols as f32 * mansion_settings.cell_size;
@@ -1987,7 +2161,10 @@ fn setup_map_editor(
     );
 }
 
-fn cleanup_map_editor(mut commands: Commands, query: Query<Entity, With<MapEditorEntity>>) {
+fn cleanup_map_editor(
+    mut commands: Commands,
+    query: Query<Entity, (With<MapEditorEntity>, Without<ChildOf>)>,
+) {
     for entity in query.iter() {
         commands.entity(entity).despawn();
     }
@@ -2622,11 +2799,6 @@ fn map_editor_ui(
                                         // Despawn target visual entity
                                         for (entity, marker) in prefab_query.iter() {
                                             if marker.index == target_idx {
-                                                if let Ok(children) = children_query.get(entity) {
-                                                    for child in children.iter() {
-                                                        commands.entity(child).despawn();
-                                                    }
-                                                }
                                                 commands.entity(entity).despawn();
                                                 break;
                                             }
@@ -2657,11 +2829,6 @@ fn map_editor_ui(
                     let p_pos = Vec3::from_array(map.prefabs[sel_idx].position);
                     for (entity, marker) in prefab_query.iter() {
                         if marker.position.distance(p_pos) < 0.05 {
-                            if let Ok(children_list) = children_query.get(entity) {
-                                for child in children_list.iter() {
-                                    commands.entity(child).despawn();
-                                }
-                            }
                             commands.entity(entity).despawn();
                             break;
                         }
@@ -2716,6 +2883,11 @@ fn map_editor_ui(
                                 "Cactus 🌵",
                             );
                             ui.selectable_value(&mut brush.tool, SculptTool::PlaceRock, "Rock");
+                            ui.selectable_value(
+                                &mut brush.tool,
+                                SculptTool::PlaceCaveEntrance,
+                                "Cave 🕳️",
+                            );
                             ui.selectable_value(
                                 &mut brush.tool,
                                 SculptTool::PlaceSpawnPoint,
@@ -2895,13 +3067,14 @@ fn map_editor_ui(
                         }
 
                         if splat_changed {
-                            for (entity, _) in terrain_query.iter() {
+                            for (entity, mesh_3d) in terrain_query.iter() {
                                 rebuild_terrain_mesh(
                                     entity,
                                     &mut commands,
                                     &map,
                                     &splat_settings,
                                     &mut meshes,
+                                    Some(mesh_3d),
                                 );
                             }
                         }
@@ -3183,6 +3356,16 @@ fn map_editor_ui(
                             "🏝️ Generate as Island (Ocean Borders)",
                         );
                         ui.add_space(5.0);
+                        ui.separator();
+                        ui.heading("🕳️ Underground Cave System");
+                        ui.checkbox(
+                            &mut biome_selection.generate_caves,
+                            "🕳️ Include Underground Cave Maze & Surface Entrances",
+                        );
+                        ui.label(
+                            "Generates a 3D underground cave maze level at Y = -150m with natural grotto entrances scattered across hills and mountains.",
+                        );
+                        ui.add_space(5.0);
 
                         if ui.button("Generate Procedural Terrain").clicked() {
                             // 1. Despawn existing visual prefabs and their children, then clear map.prefabs
@@ -3213,28 +3396,40 @@ fn map_editor_ui(
                                 active_biomes.push(Biome::Temperate); // fallback
                             }
 
+                            let lake_perlin = PerlinNoise::new(noise_settings.seed + 888);
+
                             for z in 0..h {
                                 for x in 0..w {
                                     let nx = x as f32 * noise_settings.frequency;
                                     let nz = z as f32 * noise_settings.frequency;
 
-                                    // fBm fractal Perlin noise in [-1.0, 1.0]
+                                    // Primary land elevation: fractal Perlin noise in [-1.0, 1.0]
                                     let noise_val =
                                         perlin.fbm(nx, nz, noise_settings.octaves, 2.0, 0.5);
 
-                                    // Scale & map to height
                                     let normalized = (noise_val + 1.0) * 0.5;
-                                    let mut final_height = (normalized
-                                        .powf(noise_settings.ridge_exponent)
-                                        * noise_settings.amplitude)
-                                        - noise_settings.height_offset;
+                                    // Gentle rolling dry land base (+1.8m elevation above water level 1.2m)
+                                    let base_land_height = 1.8 + (normalized.powf(noise_settings.ridge_exponent) * noise_settings.amplitude);
+
+                                    // Secondary low-frequency lake noise for deep lakes & ponds
+                                    let lake_val = lake_perlin.fbm(nx * 0.35, nz * 0.35, 2, 2.0, 0.5);
+                                    let mut final_height = base_land_height;
+
+                                    // Carve out deep, substantial lakes and ponds where lake_val < -0.22
+                                    if lake_val < -0.22 {
+                                        let lake_factor = ((-0.22 - lake_val) / 0.78).clamp(0.0, 1.0);
+                                        let carved_lake_y = -1.5 - lake_factor.powf(1.3) * 4.5; // -1.5m to -6.0m deep!
+                                        final_height = base_land_height * (1.0 - lake_factor) + carved_lake_y * lake_factor;
+                                    }
+
+                                    final_height -= noise_settings.height_offset;
 
                                     if biome_selection.make_island {
                                         let dx = (x as f32 - (w as f32 / 2.0)) / (w as f32 / 2.0);
                                         let dz = (z as f32 - (h as f32 / 2.0)) / (h as f32 / 2.0);
                                         let d = (dx * dx + dz * dz).sqrt();
-                                        let mask = (1.0 - d.powf(2.2)).clamp(0.0, 1.0);
-                                        let ocean_depth = -6.0;
+                                        let mask = (1.0 - d.powf(2.4)).clamp(0.0, 1.0);
+                                        let ocean_depth = -8.0;
                                         final_height =
                                             final_height * mask + ocean_depth * (1.0 - mask);
                                     }
@@ -3256,7 +3451,7 @@ fn map_editor_ui(
                             }
 
                             // 2b. Clean up & initialize house and spawn point prefabs
-                            let house_pos = Vec3::new(0.0, 1.5, 0.0);
+                            let house_pos = Vec3::new(-35.0, 1.5, -35.0);
                             let spawn_pos = Vec3::new(0.0, 2.0, 5.0);
 
                             map.prefabs.push(PlacedPrefab {
@@ -3331,6 +3526,50 @@ fn map_editor_ui(
                                 &asset_server,
                                 None,
                             );
+
+                            // 2c. Spawn Natural Cave Entrances across map quadrants if enabled
+                            if biome_selection.generate_caves {
+                                let cave_coords = [
+                                    Vec3::new(-half_map_w * 0.5, 0.0, -half_map_h * 0.5),
+                                    Vec3::new(half_map_w * 0.5, 0.0, -half_map_h * 0.5),
+                                    Vec3::new(-half_map_w * 0.5, 0.0, half_map_h * 0.5),
+                                    Vec3::new(half_map_w * 0.5, 0.0, half_map_h * 0.5),
+                                ];
+
+                                for mut c_pos in cave_coords {
+                                    let cx_idx = ((c_pos.x + half_map_w).round() as i32)
+                                        .clamp(0, w as i32 - 1) as u32;
+                                    let cz_idx = ((c_pos.z + half_map_h).round() as i32)
+                                        .clamp(0, h as i32 - 1) as u32;
+                                    c_pos.y = map.get_height(cx_idx, cz_idx);
+
+                                    let prefab_idx = map.prefabs.len();
+                                    map.prefabs.push(PlacedPrefab {
+                                        prefab_type: "cave_entrance".to_string(),
+                                        position: c_pos.to_array(),
+                                        rotation: [0.0, 0.0, 0.0, 1.0],
+                                        scale: [1.0, 1.0, 1.0],
+                                        texture_override: None,
+                                        rotation_y: Some(0.0),
+                                        custom_mesh: None,
+                                    });
+
+                                    spawn_prefab_visuals(
+                                        &mut commands,
+                                        &mut meshes,
+                                        &mut materials,
+                                        "cave_entrance",
+                                        c_pos,
+                                        Quat::IDENTITY,
+                                        Vec3::ONE,
+                                        None,
+                                        &mansion_settings,
+                                        prefab_idx,
+                                        &asset_server,
+                                        None,
+                                    );
+                                }
+                            }
 
                             // Generate roads and smooth the terrain underneath them
                             generate_roads_on_map(&mut map);
@@ -3447,13 +3686,14 @@ fn map_editor_ui(
                             }
 
                             // 4. Rebuild the 3D terrain mesh instantly with the biome's splatmap color scheme
-                            for (entity, _) in terrain_query.iter() {
+                            for (entity, mesh_3d) in terrain_query.iter() {
                                 rebuild_terrain_mesh(
                                     entity,
                                     &mut commands,
                                     &map,
                                     &splat_settings,
                                     &mut meshes,
+                                    Some(mesh_3d),
                                 );
                             }
 
@@ -3480,13 +3720,14 @@ fn map_editor_ui(
                         ui.add_space(3.0);
                         if ui.button("Generate Road Network").clicked() {
                             generate_roads_on_map(&mut map);
-                            for (entity, _) in terrain_query.iter() {
+                            for (entity, mesh_3d) in terrain_query.iter() {
                                 rebuild_terrain_mesh(
                                     entity,
                                     &mut commands,
                                     &map,
                                     &splat_settings,
                                     &mut meshes,
+                                    Some(mesh_3d),
                                 );
                             }
 
@@ -3554,13 +3795,6 @@ fn map_editor_ui(
                                                 Ok(imported_map) => {
                                                     // Despawn existing visual prefabs first
                                                     for (entity, _) in prefab_query.iter() {
-                                                        if let Ok(children) =
-                                                            children_query.get(entity)
-                                                        {
-                                                            for child in children.iter() {
-                                                                commands.entity(child).despawn();
-                                                            }
-                                                        }
                                                         commands.entity(entity).despawn();
                                                     }
 
@@ -3601,13 +3835,14 @@ fn map_editor_ui(
                                                         );
                                                     }
 
-                                                    for (entity, _) in terrain_query.iter() {
+                                                    for (entity, mesh_3d) in terrain_query.iter() {
                                                         rebuild_terrain_mesh(
                                                             entity,
                                                             &mut commands,
                                                             &map,
                                                             &splat_settings,
                                                             &mut meshes,
+                                                            Some(mesh_3d),
                                                         );
                                                     }
                                                 }
@@ -4382,6 +4617,7 @@ fn terrain_sculpting_system(
             | SculptTool::PlaceShrub
             | SculptTool::PlaceCactus
             | SculptTool::PlaceRock
+            | SculptTool::PlaceCaveEntrance
             | SculptTool::PlaceSpawnPoint
             | SculptTool::PlaceHouse
             | SculptTool::PlaceOreCopper
@@ -4425,6 +4661,7 @@ fn terrain_sculpting_system(
             SculptTool::PlaceShrub => "shrub",
             SculptTool::PlaceCactus => "cactus",
             SculptTool::PlaceRock => "rock",
+            SculptTool::PlaceCaveEntrance => "cave_entrance",
             SculptTool::PlaceSpawnPoint => "spawn_point",
             SculptTool::PlaceHouse => "house",
             SculptTool::PlaceOreCopper => "ore_copper",
@@ -4727,55 +4964,64 @@ fn terrain_sculpting_system(
             }
 
             if modified {
-                for (terrain_entity, _) in terrain_query.iter() {
-                    rebuild_terrain_mesh(
-                        terrain_entity,
-                        &mut commands,
-                        &map,
-                        &settings,
-                        &mut meshes,
-                    );
+                for (_, mesh_handle) in terrain_query.iter() {
+                    if let Some(mut mesh) = meshes.get_mut(&mesh_handle.0) {
+                        update_terrain_mesh_in_place(&mut mesh, &map, &settings);
+                    }
                 }
 
-                // Check and delete prefabs that are now below beach/water level or floating
-                let mut to_remove_indices = Vec::new();
+                // Check prefabs within brush radius: update ground height or despawn if lowered into water/beach
                 let w = map.width;
                 let h = map.height;
                 let offset_x = -(w as f32) / 2.0;
                 let offset_z = -(h as f32) / 2.0;
 
-                for (idx, prefab) in map.prefabs.iter().enumerate() {
-                    let px = prefab.position[0];
-                    let pz = prefab.position[2];
+                let mut to_remove_indices = Vec::new();
 
-                    // Map back to heightmap coordinate
-                    let hx = ((px - offset_x).round() as i32).clamp(0, w as i32 - 1) as u32;
-                    let hz = ((pz - offset_z).round() as i32).clamp(0, h as i32 - 1) as u32;
-                    let new_h = map.get_height(hx, hz);
+                for idx in 0..map.prefabs.len() {
+                    let px = map.prefabs[idx].position[0];
+                    let pz = map.prefabs[idx].position[2];
 
-                    // Is it below sand height or has the ground moved too much?
-                    let has_no_ground = (prefab.position[1] - new_h).abs() > 1.2;
-                    let below_water = new_h < settings.sand_height;
+                    let dx = px - intersection.x;
+                    let dz = pz - intersection.z;
 
-                    if has_no_ground || below_water {
-                        to_remove_indices.push(idx);
+                    // If prefab is inside sculpt brush region
+                    if dx * dx + dz * dz <= radius_sq {
+                        let hx = ((px - offset_x).round() as i32).clamp(0, w as i32 - 1) as u32;
+                        let hz = ((pz - offset_z).round() as i32).clamp(0, h as i32 - 1) as u32;
+                        let new_h = map.get_height(hx, hz);
+
+                        // If ground is lowered into sand/water, schedule for deletion
+                        if new_h < settings.sand_height + 0.3 {
+                            to_remove_indices.push(idx);
+                        } else {
+                            // Update prefab stored height to follow terrain
+                            map.prefabs[idx].position[1] = new_h;
+
+                            // Update active entity visual position & marker
+                            for (entity, mut marker) in prefab_query.iter_mut() {
+                                if (marker.position.x - px).abs() < 0.2
+                                    && (marker.position.z - pz).abs() < 0.2
+                                {
+                                    marker.position.y = new_h;
+                                    if let Ok(mut trans) = preview_transform_query.get_mut(entity) {
+                                        trans.translation.y = new_h;
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
                 if !to_remove_indices.is_empty() {
-                    // Sort in reverse order to remove from map.prefabs safely
                     to_remove_indices.sort_by(|a, b| b.cmp(a));
                     for &idx in to_remove_indices.iter() {
                         let removed = map.prefabs.remove(idx);
                         let removed_pos = Vec3::from_array(removed.position);
-                        // Despawn visual entity
                         for (entity, marker) in prefab_query.iter() {
-                            if marker.position.distance(removed_pos) < 0.1 {
-                                if let Ok(children) = children_query.get(entity) {
-                                    for child in children.iter() {
-                                        commands.entity(child).despawn();
-                                    }
-                                }
+                            if (marker.position.x - removed_pos.x).abs() < 0.2
+                                && (marker.position.z - removed_pos.z).abs() < 0.2
+                            {
                                 commands.entity(entity).despawn();
                             }
                         }
@@ -4788,10 +5034,12 @@ fn terrain_sculpting_system(
                     force: brush.strength * 0.04 * dt,
                     radius: brush.size * 0.6,
                 });
-
-                // Regenerate grass to match new heights
-                grass_writer.write(crate::grass::GenerateGrassEvent);
             }
+        }
+
+        if mouse_button.just_released(MouseButton::Left) {
+            // Regenerate grass once when sculpting stroke finishes
+            grass_writer.write(crate::grass::GenerateGrassEvent);
         }
     } else if !is_sculpt_tool && mouse_button.just_pressed(MouseButton::Left) {
         let mut handle_clicked = false;
@@ -4861,6 +5109,7 @@ fn terrain_sculpting_system(
                     | SculptTool::PlaceShrub
                     | SculptTool::PlaceCactus
                     | SculptTool::PlaceRock
+                    | SculptTool::PlaceCaveEntrance
                     | SculptTool::PlaceSpawnPoint
                     | SculptTool::PlaceHouse
                     | SculptTool::PlaceOreCopper
@@ -4904,6 +5153,7 @@ fn terrain_sculpting_system(
                     SculptTool::PlaceShrub => "shrub",
                     SculptTool::PlaceCactus => "cactus",
                     SculptTool::PlaceRock => "rock",
+                    SculptTool::PlaceCaveEntrance => "cave_entrance",
                     SculptTool::PlaceSpawnPoint => "spawn_point",
                     SculptTool::PlaceHouse => "house",
                     SculptTool::PlaceOreCopper => "ore_copper",
@@ -4961,11 +5211,6 @@ fn terrain_sculpting_system(
                     map.prefabs.retain(|p| p.prefab_type != "house");
                     for (entity, marker) in prefab_query.iter() {
                         if marker.prefab_type == "house" {
-                            if let Ok(children) = children_query.get(entity) {
-                                for child in children.iter() {
-                                    commands.entity(child).despawn();
-                                }
-                            }
                             commands.entity(entity).despawn();
                         }
                     }
@@ -5104,11 +5349,6 @@ fn terrain_sculpting_system(
                             let removed_pos = Vec3::from_array(removed.position);
                             for (entity, marker) in prefab_query.iter() {
                                 if marker.position.distance(removed_pos) < 0.1 {
-                                    if let Ok(children_list) = children_query.get(entity) {
-                                        for child in children_list.iter() {
-                                            commands.entity(child).despawn();
-                                        }
-                                    }
                                     commands.entity(entity).despawn();
                                     break;
                                 }
@@ -5141,11 +5381,6 @@ fn terrain_sculpting_system(
                         let inside = (marker.position.x - intersection.x).abs() < half_w + 1.0
                             && (marker.position.z - intersection.z).abs() < half_d + 1.0;
                         if inside {
-                            if let Ok(children) = children_query.get(entity) {
-                                for child in children.iter() {
-                                    commands.entity(child).despawn();
-                                }
-                            }
                             commands.entity(entity).despawn();
                         }
                     }
@@ -5169,13 +5404,14 @@ fn terrain_sculpting_system(
                     }
 
                     // Rebuild terrain mesh in-place
-                    for (terrain_entity, _) in terrain_query.iter() {
+                    for (terrain_entity, mesh_3d) in terrain_query.iter() {
                         rebuild_terrain_mesh(
                             terrain_entity,
                             &mut commands,
                             &map,
                             &settings,
                             &mut meshes,
+                            Some(mesh_3d),
                         );
                     }
                     grass_writer.write(crate::grass::GenerateGrassEvent);
@@ -5210,13 +5446,14 @@ fn terrain_sculpting_system(
                         }
                     }
 
-                    for (terrain_entity, _) in terrain_query.iter() {
+                    for (terrain_entity, mesh_3d) in terrain_query.iter() {
                         rebuild_terrain_mesh(
                             terrain_entity,
                             &mut commands,
                             &map,
                             &settings,
                             &mut meshes,
+                            Some(mesh_3d),
                         );
                     }
                 }
@@ -5240,11 +5477,6 @@ fn terrain_sculpting_system(
                     // Despawn 3D parent entity and its child meshes
                     for (entity, marker) in prefab_query.iter() {
                         if marker.position.distance(p_pos) < 0.05 {
-                            if let Ok(children) = children_query.get(entity) {
-                                for child in children.iter() {
-                                    commands.entity(child).despawn();
-                                }
-                            }
                             commands.entity(entity).despawn();
                             break;
                         }
@@ -5541,10 +5773,33 @@ pub fn water_simulation_system(
 
                 // Restorative damping returning height back to equilibrium (1.0)
                 new_height = new_height + (1.0 - new_height) * 0.035 * delta_time * 60.0;
-                new_height = new_height.clamp(0.05, 4.5);
+                new_height = new_height.clamp(0.85, 1.15);
 
                 if water_data.is_wall(x, z) {
-                    new_height = 0.1;
+                    // Smoothly inherit height from neighboring open-water cells so shoreline moves in unison
+                    let mut sum_h = 0.0;
+                    let mut count = 0.0;
+                    if x > 0 && !water_data.is_wall(x - 1, z) {
+                        sum_h += water_data.get_height(x - 1, z);
+                        count += 1.0;
+                    }
+                    if x < w - 1 && !water_data.is_wall(x + 1, z) {
+                        sum_h += water_data.get_height(x + 1, z);
+                        count += 1.0;
+                    }
+                    if z > 0 && !water_data.is_wall(x, z - 1) {
+                        sum_h += water_data.get_height(x, z - 1);
+                        count += 1.0;
+                    }
+                    if z < h - 1 && !water_data.is_wall(x, z + 1) {
+                        sum_h += water_data.get_height(x, z + 1);
+                        count += 1.0;
+                    }
+                    if count > 0.0 {
+                        new_height = sum_h / count;
+                    } else {
+                        new_height = 1.0;
+                    }
                 }
 
                 water_data.set_height(x, z, new_height);
@@ -5573,6 +5828,9 @@ pub fn water_simulation_system(
                         let dist_sq = rx * rx + rz * rz;
                         let radius_sq = radius * radius;
                         if dist_sq <= radius_sq {
+                            if water_data.is_wall(px as u32, pz as u32) {
+                                continue;
+                            }
                             let dist = (dist_sq as f32).sqrt();
                             let falloff = 1.0 - (dist / event.radius.max(0.1));
                             let current = water_data.get_height(px as u32, pz as u32);
@@ -5586,105 +5844,6 @@ pub fn water_simulation_system(
                 }
             }
         }
-    }
-}
-
-pub fn generate_animated_water_mesh(water_data: &WaterSimData) -> Mesh {
-    let w = water_data.width;
-    let h = water_data.height;
-    let mut positions = Vec::with_capacity((w * h) as usize);
-    let mut normals = Vec::with_capacity((w * h) as usize);
-    let mut uvs = Vec::with_capacity((w * h) as usize);
-    let mut indices = Vec::new();
-
-    let offset_x = -(w as f32) / 2.0;
-    let offset_z = -(h as f32) / 2.0;
-
-    for z in 0..h {
-        for x in 0..w {
-            let sim_h = water_data.get_height(x, z);
-            let y_val = if water_data.is_wall(x, z) {
-                -3.0
-            } else {
-                sim_h - 1.0
-            };
-            positions.push([x as f32 + offset_x, y_val, z as f32 + offset_z]);
-            uvs.push([x as f32 / w as f32, z as f32 / h as f32]);
-        }
-    }
-
-    // Pre-calculate normals using position heights
-    for z in 0..h {
-        for x in 0..w {
-            let idx = (z * w + x) as usize;
-            let mut dx = 0.0;
-            let mut dz = 0.0;
-
-            if x > 0 && x < w - 1 {
-                let h_left = positions[idx - 1][1];
-                let h_right = positions[idx + 1][1];
-                dx = (h_right - h_left) / 2.0;
-            }
-            if z > 0 && z < h - 1 {
-                let h_up = positions[idx - w as usize][1];
-                let h_down = positions[idx + w as usize][1];
-                dz = (h_down - h_up) / 2.0;
-            }
-
-            let normal = Vec3::new(-dx, 1.0, -dz).normalize();
-            normals.push([normal.x, normal.y, normal.z]);
-        }
-    }
-
-    for z in 0..(h - 1) {
-        for x in 0..(w - 1) {
-            let i0 = z * w + x;
-            let i1 = z * w + (x + 1);
-            let i2 = (z + 1) * w + x;
-            let i3 = (z + 1) * w + (x + 1);
-
-            indices.push(i0);
-            indices.push(i2);
-            indices.push(i1);
-
-            indices.push(i1);
-            indices.push(i2);
-            indices.push(i3);
-        }
-    }
-
-    let mut mesh = Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::default(),
-    );
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-    mesh.insert_indices(Indices::U32(indices));
-    mesh
-}
-
-pub fn animate_water_mesh_system(
-    mut commands: Commands,
-    time: Res<Time>,
-    mut timer: Local<f32>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    water_query: Query<(Entity, &WaterSimData, &Mesh3d), With<WaterMesh>>,
-) {
-    *timer += time.delta_secs();
-    if *timer < 0.05 {
-        // 20 FPS updates
-        return;
-    }
-    *timer = 0.0;
-
-    for (water_entity, water_data, _) in water_query.iter() {
-        if water_data.width > 256 || water_data.height > 256 {
-            continue;
-        }
-        let new_mesh = generate_animated_water_mesh(water_data);
-        let new_handle = meshes.add(new_mesh);
-        commands.entity(water_entity).insert(Mesh3d(new_handle));
     }
 }
 
@@ -5802,18 +5961,10 @@ pub fn generate_roads_on_map(map: &mut TempestMap) {
 
             // Pathfind using the optimized A* algorithm
             if let Some(path) = pathfind_road(map, start, end) {
-                let h_start = map.get_height(start.0 as u32, start.1 as u32);
-                let h_end = map.get_height(end.0 as u32, end.1 as u32);
-                let path_len = path.len();
-
                 // Paint the road and grade the terrain along it
-                for (i, &(px, pz)) in path.iter().enumerate() {
-                    let t = if path_len > 1 {
-                        i as f32 / (path_len - 1) as f32
-                    } else {
-                        0.0
-                    };
-                    let road_h = (h_start * (1.0 - t) + h_end * t).max(1.35); // Keep land roads dry!
+                for &(px, pz) in path.iter() {
+                    let local_h = map.get_height(px, pz);
+                    let road_h = local_h.max(1.35); // Follow natural terrain contours while keeping land roads dry!
 
                     // Set road cell type (1 = Asphalt Paved, 2 = Alien Dirt/Gravel, 3 = Bridge)
                     let road_type = if start_idx == 1 || end_idx == 1 { 2 } else { 1 };

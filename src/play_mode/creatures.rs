@@ -12,6 +12,7 @@ pub enum CreatureType {
     Triangaroo,
     Polypug,
     Bird,
+    BigBird,
     Monster,
     Fox,
     Alien,
@@ -24,6 +25,8 @@ pub enum CreatureState {
     Wandering,
     Chasing,
     Attacking,
+    Landing,
+    TakingOff,
     Dead,
 }
 
@@ -261,7 +264,7 @@ pub fn drive_fox_animations(
         }
 
         let speed = creature.velocity.length();
-        let target_node = if speed < 0.1 {
+        let target_node = if creature.state == CreatureState::Idle || speed < 0.1 {
             anims.survey
         } else if speed < 2.5 {
             anims.walk
@@ -270,6 +273,7 @@ pub fn drive_fox_animations(
         };
         // Only switch animation when the target clip changes to avoid restarting it every frame
         if !player.is_playing_animation(target_node) {
+            player.stop_all();
             player.play(target_node).repeat();
         }
     }
@@ -318,7 +322,9 @@ pub fn drive_trilobite_animations(
         } else {
             anims.idle
         };
+        // Only switch animation when the target clip changes
         if !player.is_playing_animation(target_node) {
+            player.stop_all();
             player.play(target_node).repeat();
         }
     }
@@ -392,8 +398,8 @@ pub fn spawn_creatures_system(
     let mut spawn_points = Vec::new();
 
     // Scan for flat areas away from spawn
-    for z in (10..(h - 10)).step_by(8) {
-        for x in (10..(w - 10)).step_by(8) {
+    for z in (10..(h - 10)).step_by(4) {
+        for x in (10..(w - 10)).step_by(4) {
             let y = map.get_height(x, z);
             if y > 0.5 {
                 // Above water
@@ -424,8 +430,8 @@ pub fn spawn_creatures_system(
         p
     };
 
-    // 1. Spawn 4 Triangaroo (Kangaroo GLTF)
-    for i in 0..4 {
+    // 1. Spawn 15 Triangaroo (Kangaroo GLTF)
+    for i in 0..15 {
         let pos = get_next_spawn(&mut spawn_idx, &spawn_points);
         commands.spawn((
             WorldAssetRoot(asset_server.load("059_Triangaroo_Art.glb#Scene0")),
@@ -451,11 +457,15 @@ pub fn spawn_creatures_system(
             avian3d::prelude::Collider::capsule(0.4, 1.2),
             avian3d::prelude::LockedAxes::ROTATION_LOCKED,
             avian3d::prelude::Friction::ZERO,
+            crate::water::WaterInteractor {
+                mass: 0.8,
+                ..default()
+            },
         ));
     }
 
-    // 2. Spawn 4 Polypug (Quadruped GLTF)
-    for i in 0..4 {
+    // 2. Spawn 15 Polypug (Quadruped GLTF)
+    for i in 0..15 {
         let pos = get_next_spawn(&mut spawn_idx, &spawn_points);
 
         commands.spawn((
@@ -482,41 +492,62 @@ pub fn spawn_creatures_system(
             avian3d::prelude::Collider::capsule(0.3, 0.5),
             avian3d::prelude::LockedAxes::ROTATION_LOCKED,
             avian3d::prelude::Friction::ZERO,
+            crate::water::WaterInteractor {
+                mass: 0.6,
+                ..default()
+            },
         ));
     }
 
-    // 3. Spawn 4 Fox (Quadruped GLTF — uses embedded GLTF animations)
-    for i in 0..4 {
+    // 3. Spawn 12 Fox (Quadruped GLTF — uses embedded GLTF animations)
+    for i in 0..12 {
         let pos = get_next_spawn(&mut spawn_idx, &spawn_points);
 
-        commands.spawn((
-            WorldAssetRoot(asset_server.load("Fox.glb#Scene0")),
-            Transform::from_translation(pos).with_scale(Vec3::splat(0.012)),
-            PlayCreature {
-                creature_type: CreatureType::Fox,
-                state: CreatureState::Wandering,
-                health: 20.0,
-                max_health: 20.0,
-                position: pos,
-                velocity: Vec3::ZERO,
-                yaw: (i as f32) * 1.15,
-                wander_timer: 1.0 + (i as f32) * 0.5,
-                hop_cooldown: 0.0,
-                is_grounded: true,
-                death_timer: 0.0,
-                attack_cooldown: 0.0,
-            },
-            PlayModeEntity,
-            Visibility::Visible,
-            InheritedVisibility::default(),
-            avian3d::prelude::RigidBody::Dynamic,
-            avian3d::prelude::Collider::capsule(0.3, 0.6),
-            avian3d::prelude::LockedAxes::ROTATION_LOCKED,
-            avian3d::prelude::Friction::ZERO,
-        ));
+        let parent_fox = commands
+            .spawn((
+                Transform::from_translation(pos),
+                PlayCreature {
+                    creature_type: CreatureType::Fox,
+                    state: CreatureState::Wandering,
+                    health: 20.0,
+                    max_health: 20.0,
+                    position: pos,
+                    velocity: Vec3::ZERO,
+                    yaw: (i as f32) * 1.15,
+                    wander_timer: 1.0 + (i as f32) * 0.5,
+                    hop_cooldown: 0.0,
+                    is_grounded: true,
+                    death_timer: 0.0,
+                    attack_cooldown: 0.0,
+                },
+                PlayModeEntity,
+                Visibility::Visible,
+                InheritedVisibility::default(),
+                avian3d::prelude::RigidBody::Dynamic,
+                avian3d::prelude::Collider::capsule(0.3, 0.6),
+                avian3d::prelude::LockedAxes::ROTATION_LOCKED,
+                avian3d::prelude::Friction::ZERO,
+                crate::water::WaterInteractor {
+                    mass: 0.5,
+                    ..default()
+                },
+            ))
+            .id();
+
+        let child_visual = commands
+            .spawn((
+                WorldAssetRoot(asset_server.load("Fox.glb#Scene0")),
+                Transform::from_scale(Vec3::splat(0.012)),
+                Visibility::Visible,
+                InheritedVisibility::default(),
+                PlayModeEntity,
+            ))
+            .id();
+
+        commands.entity(parent_fox).add_child(child_visual);
     }
 
-    // 4. Spawn 3 Birds (Procedural flying birds circling overhead)
+    // 4. Spawn 8 Birds (Procedural flying birds circling overhead)
     let bird_mesh = meshes.add(Sphere::new(0.18));
     let bird_mat = materials.add(StandardMaterial {
         base_color: Color::srgb(0.2, 0.6, 0.8), // vibrant blue plumage
@@ -531,11 +562,13 @@ pub fn spawn_creatures_system(
         ..default()
     });
 
-    for i in 0..3 {
+    for i in 0..8 {
+        let angle = (i as f32) * std::f32::consts::TAU / 8.0;
+        let radius = 25.0 + (i as f32) * 8.0;
         let start_pos = Vec3::new(
-            -15.0 + (i as f32) * 15.0,
-            12.0 + (i as f32) * 1.5,
-            -15.0 + (i as f32) * 15.0,
+            angle.cos() * radius,
+            12.0 + (i as f32) * 1.2,
+            angle.sin() * radius,
         );
 
         let parent_bird = commands
@@ -586,7 +619,90 @@ pub fn spawn_creatures_system(
         commands.entity(parent_bird).add_child(right_wing);
     }
 
-    // 5. Spawn 2 Alien Monsters (Procedural Alien Jellyfish)
+    // 4.5. Spawn 5 Giant Eagles / Big Birds (Take off, cruise, land on ground, perch, and take off again)
+    let big_bird_mesh = meshes.add(Sphere::new(0.55));
+    let big_bird_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.68, 0.42, 0.18), // Golden-brown plumage
+        perceptual_roughness: 0.4,
+        metallic: 0.25,
+        ..default()
+    });
+
+    let big_wing_mesh = meshes.add(Cuboid::new(1.6, 0.05, 0.42));
+    let big_wing_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.95, 0.85, 0.6), // Golden flight feathers
+        perceptual_roughness: 0.5,
+        ..default()
+    });
+
+    for i in 0..5 {
+        let angle = (i as f32) * std::f32::consts::TAU / 5.0 + 0.5;
+        let radius = 35.0 + (i as f32) * 10.0;
+        let start_pos = Vec3::new(
+            angle.cos() * radius,
+            18.0 + (i as f32) * 1.5,
+            angle.sin() * radius,
+        );
+
+        let parent_big_bird = commands
+            .spawn((
+                Mesh3d(big_bird_mesh.clone()),
+                MeshMaterial3d(big_bird_mat.clone()),
+                Transform::from_translation(start_pos),
+                PlayCreature {
+                    creature_type: CreatureType::BigBird,
+                    state: CreatureState::Wandering, // Starts cruising overhead
+                    health: 50.0,
+                    max_health: 50.0,
+                    position: start_pos,
+                    velocity: Vec3::ZERO,
+                    yaw: (i as f32) * 1.25,
+                    wander_timer: 8.0 + (i as f32) * 4.0, // Cruise timer before choosing landing spot
+                    hop_cooldown: 0.0,
+                    is_grounded: false,
+                    death_timer: 0.0,
+                    attack_cooldown: 0.0,
+                },
+                PlayModeEntity,
+                Visibility::Visible,
+                InheritedVisibility::default(),
+                avian3d::prelude::RigidBody::Dynamic,
+                avian3d::prelude::Collider::sphere(0.7),
+                avian3d::prelude::LockedAxes::ROTATION_LOCKED,
+                avian3d::prelude::Friction::ZERO,
+                crate::water::WaterInteractor {
+                    mass: 0.7,
+                    ..default()
+                },
+            ))
+            .id();
+
+        // Spawn left giant wing
+        let left_wing = commands
+            .spawn((
+                Mesh3d(big_wing_mesh.clone()),
+                MeshMaterial3d(big_wing_mat.clone()),
+                Transform::from_xyz(-0.9, 0.0, 0.0),
+                ProceduralWing { is_left: true },
+                PlayModeEntity,
+            ))
+            .id();
+        commands.entity(parent_big_bird).add_child(left_wing);
+
+        // Spawn right giant wing
+        let right_wing = commands
+            .spawn((
+                Mesh3d(big_wing_mesh.clone()),
+                MeshMaterial3d(big_wing_mat.clone()),
+                Transform::from_xyz(0.9, 0.0, 0.0),
+                ProceduralWing { is_left: false },
+                PlayModeEntity,
+            ))
+            .id();
+        commands.entity(parent_big_bird).add_child(right_wing);
+    }
+
+    // 5. Spawn 5 Alien Monsters (Procedural Alien Jellyfish)
     let jelly_bell_mesh = meshes.add(Sphere::new(0.6).mesh().uv(32, 16));
     let jelly_mat = materials.add(StandardMaterial {
         base_color: Color::srgba(0.1, 0.9, 0.4, 0.6), // Translucent glowing green
@@ -602,7 +718,7 @@ pub fn spawn_creatures_system(
         ..default()
     });
 
-    for i in 0..2 {
+    for i in 0..5 {
         let pos = get_next_spawn(&mut spawn_idx, &spawn_points);
         let monster_entity = commands
             .spawn((
@@ -612,8 +728,8 @@ pub fn spawn_creatures_system(
                 PlayCreature {
                     creature_type: CreatureType::Monster,
                     state: CreatureState::Wandering,
-                    health: 150.0,
-                    max_health: 150.0,
+                    health: 70.0,
+                    max_health: 70.0,
                     position: pos,
                     velocity: Vec3::ZERO,
                     yaw: (i as f32) * std::f32::consts::PI,
@@ -704,9 +820,12 @@ pub fn spawn_creatures_system(
         h1_pos + Vec3::new(0.0, 0.2, 2.0),
         h2_pos + Vec3::new(2.0, 0.2, 0.0),
         h3_pos + Vec3::new(0.0, 0.2, -2.0),
+        h1_pos + Vec3::new(-2.0, 0.2, 0.0),
+        h2_pos + Vec3::new(0.0, 0.2, 2.0),
+        h3_pos + Vec3::new(2.0, 0.2, 0.0),
     ];
 
-    for i in 0..3 {
+    for i in 0..6 {
         let pos = alien_spawn_positions[i];
         commands.spawn((
             WorldAssetRoot(asset_server.load("alien.glb#Scene0")),
@@ -740,16 +859,218 @@ pub fn spawn_creatures_system(
     }
 }
 
+#[derive(Resource)]
+pub struct CreatureRespawnTimer {
+    pub timer: f32,
+}
+
+impl Default for CreatureRespawnTimer {
+    fn default() -> Self {
+        Self { timer: 0.0 }
+    }
+}
+
+pub fn creature_respawn_system(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    time: Res<Time>,
+    map: Res<TempestMap>,
+    creature_query: Query<&PlayCreature>,
+    mut respawn_timer: ResMut<CreatureRespawnTimer>,
+) {
+    respawn_timer.timer += time.delta_secs();
+    if respawn_timer.timer < 30.0 {
+        return; // Only check every 30 seconds
+    }
+    respawn_timer.timer = 0.0;
+
+    // Count living creatures by type
+    let mut triangaroo_count = 0u32;
+    let mut polypug_count = 0u32;
+    let mut fox_count = 0u32;
+
+    for creature in creature_query.iter() {
+        if creature.state == CreatureState::Dead {
+            continue;
+        }
+        match creature.creature_type {
+            CreatureType::Triangaroo => triangaroo_count += 1,
+            CreatureType::Polypug => polypug_count += 1,
+            CreatureType::Fox => fox_count += 1,
+            CreatureType::BigBird => {}
+            _ => {}
+        }
+    }
+
+    // Build spawn points
+    let w = map.width;
+    let h = map.height;
+    let offset_x = -(w as f32) / 2.0;
+    let offset_z = -(h as f32) / 2.0;
+    let mut spawn_points = Vec::new();
+    for z in (10..(h - 10)).step_by(6) {
+        for x in (10..(w - 10)).step_by(6) {
+            let y = map.get_height(x, z);
+            if y > 0.5 {
+                let pos = Vec3::new(x as f32 + offset_x, y, z as f32 + offset_z);
+                if pos.length() > 20.0 {
+                    spawn_points.push(pos);
+                }
+            }
+        }
+    }
+    if spawn_points.is_empty() {
+        return;
+    }
+
+    // Shuffle deterministically
+    let t = time.elapsed_secs();
+    spawn_points.sort_by_cached_key(|pos| {
+        (((pos.x * 12.9898 + pos.z * 78.233 + t).sin() * 43_758.547).fract() * 100000.0) as i32
+    });
+
+    let mut idx = 0usize;
+
+    // Respawn Triangaroo up to target of 15
+    let triangaroo_target: u32 = 10;
+    for _ in 0..(triangaroo_target.saturating_sub(triangaroo_count)) {
+        let pos = spawn_points[idx % spawn_points.len()];
+        idx += 1;
+        commands.spawn((
+            WorldAssetRoot(asset_server.load("059_Triangaroo_Art.glb#Scene0")),
+            Transform::from_translation(pos),
+            PlayCreature {
+                creature_type: CreatureType::Triangaroo,
+                state: CreatureState::Wandering,
+                health: 30.0,
+                max_health: 30.0,
+                position: pos,
+                velocity: Vec3::ZERO,
+                yaw: t.sin() * std::f32::consts::PI,
+                wander_timer: 2.0,
+                hop_cooldown: 1.0,
+                is_grounded: true,
+                death_timer: 0.0,
+                attack_cooldown: 0.0,
+            },
+            PlayModeEntity,
+            Visibility::Visible,
+            InheritedVisibility::default(),
+            avian3d::prelude::RigidBody::Dynamic,
+            avian3d::prelude::Collider::capsule(0.4, 1.2),
+            avian3d::prelude::LockedAxes::ROTATION_LOCKED,
+            avian3d::prelude::Friction::ZERO,
+            crate::water::WaterInteractor {
+                mass: 0.8,
+                ..default()
+            },
+        ));
+    }
+
+    // Respawn Polypug up to target of 10
+    let polypug_target: u32 = 10;
+    for _ in 0..(polypug_target.saturating_sub(polypug_count)) {
+        let pos = spawn_points[idx % spawn_points.len()];
+        idx += 1;
+        commands.spawn((
+            WorldAssetRoot(asset_server.load("060_Polypug_Art.glb#Scene0")),
+            Transform::from_translation(pos),
+            PlayCreature {
+                creature_type: CreatureType::Polypug,
+                state: CreatureState::Wandering,
+                health: 20.0,
+                max_health: 20.0,
+                position: pos,
+                velocity: Vec3::ZERO,
+                yaw: t.cos() * std::f32::consts::PI,
+                wander_timer: 1.5,
+                hop_cooldown: 0.0,
+                is_grounded: true,
+                death_timer: 0.0,
+                attack_cooldown: 0.0,
+            },
+            PlayModeEntity,
+            Visibility::Visible,
+            InheritedVisibility::default(),
+            avian3d::prelude::RigidBody::Dynamic,
+            avian3d::prelude::Collider::capsule(0.3, 0.5),
+            avian3d::prelude::LockedAxes::ROTATION_LOCKED,
+            avian3d::prelude::Friction::ZERO,
+            crate::water::WaterInteractor {
+                mass: 0.6,
+                ..default()
+            },
+        ));
+    }
+
+    // Respawn Foxes up to target of 8
+    let fox_target: u32 = 8;
+    for _ in 0..(fox_target.saturating_sub(fox_count)) {
+        let pos = spawn_points[idx % spawn_points.len()];
+        idx += 1;
+        let parent_fox = commands
+            .spawn((
+                Transform::from_translation(pos),
+                PlayCreature {
+                    creature_type: CreatureType::Fox,
+                    state: CreatureState::Wandering,
+                    health: 20.0,
+                    max_health: 20.0,
+                    position: pos,
+                    velocity: Vec3::ZERO,
+                    yaw: t * 1.15,
+                    wander_timer: 2.0,
+                    hop_cooldown: 0.0,
+                    is_grounded: true,
+                    death_timer: 0.0,
+                    attack_cooldown: 0.0,
+                },
+                PlayModeEntity,
+                Visibility::Visible,
+                InheritedVisibility::default(),
+                avian3d::prelude::RigidBody::Dynamic,
+                avian3d::prelude::Collider::capsule(0.3, 0.6),
+                avian3d::prelude::LockedAxes::ROTATION_LOCKED,
+                avian3d::prelude::Friction::ZERO,
+                crate::water::WaterInteractor {
+                    mass: 0.5,
+                    ..default()
+                },
+            ))
+            .id();
+        let child_visual = commands
+            .spawn((
+                WorldAssetRoot(asset_server.load("Fox.glb#Scene0")),
+                Transform::from_scale(Vec3::splat(0.012)),
+                Visibility::Visible,
+                InheritedVisibility::default(),
+                PlayModeEntity,
+            ))
+            .id();
+        commands.entity(parent_fox).add_child(child_visual);
+    }
+}
+
 // ──────────────────────────────────────────────
 // Creature AI
 // ──────────────────────────────────────────────
 
 // Runs AI movement, gravity, and attacking logic for all creatures
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct CreatureAssets<'w> {
+    pub meshes: ResMut<'w, Assets<Mesh>>,
+    pub materials: ResMut<'w, Assets<StandardMaterial>>,
+    pub inventory: Res<'w, crate::play_mode::PlayerInventory>,
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn creature_ai_system(
     mut commands: Commands,
     time: Res<Time>,
     map: Res<TempestMap>,
+    water_settings: Res<crate::map_editor::WaterSettings>,
+    mut impulse_writer: MessageWriter<crate::map_editor::WaterImpulseEvent>,
     mut player_query: Query<(Entity, &mut PlayModePlayer)>,
     mut creature_query: Query<(
         Entity,
@@ -763,13 +1084,13 @@ pub fn creature_ai_system(
         (Without<PlayModePlayer>, Without<PlayCreature>),
     >,
     door_query: Query<&crate::play_mode::house::HouseDoor>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut assets: CreatureAssets,
 ) {
     let dt = time.delta_secs();
     let Ok((_player_entity, mut player)) = player_query.single_mut() else {
         return;
     };
+    let inventory = &assets.inventory;
     let player_pos = player.position;
 
     // Pre-collect hostile creature positions so the trilobite can find targets
@@ -802,10 +1123,10 @@ pub fn creature_ai_system(
             let tilt_progress = (creature.death_timer / 0.5).min(1.0);
             let tilt_angle = tilt_progress * std::f32::consts::FRAC_PI_2;
             let yaw_offset = match creature.creature_type {
-                CreatureType::Triangaroo => 0.0,
-                CreatureType::Polypug | CreatureType::Monster => 0.0,
+                CreatureType::Triangaroo => std::f32::consts::FRAC_PI_2,
+                CreatureType::Polypug | CreatureType::Monster => std::f32::consts::FRAC_PI_2,
                 CreatureType::Fox => 0.0,
-                CreatureType::Alien => 0.0,
+                CreatureType::Alien => std::f32::consts::FRAC_PI_2,
                 CreatureType::RobotTrilobite => 0.0,
                 _ => -std::f32::consts::FRAC_PI_2,
             };
@@ -818,8 +1139,8 @@ pub fn creature_ai_system(
                 let drop_pos = creature.position + Vec3::Y * 0.5;
                 spawn_death_loot_mesh(
                     &mut commands,
-                    &mut meshes,
-                    &mut materials,
+                    &mut assets.meshes,
+                    &mut assets.materials,
                     drop_pos,
                     creature.creature_type,
                 );
@@ -831,6 +1152,78 @@ pub fn creature_ai_system(
         // Ticking attack cooldown
         if creature.attack_cooldown > 0.0 {
             creature.attack_cooldown -= dt;
+        }
+
+        // Water detection & swimming / avoidance handling for land creatures
+        let water_level = water_settings.height;
+        let c_terrain = get_bilinear_height(creature.position.x, creature.position.z, &map);
+        let c_ground = get_effective_floor_height(creature.position, c_terrain);
+        let c_water_depth = (water_level - c_ground).max(0.0);
+
+        if creature.creature_type != CreatureType::Bird
+            && creature.creature_type != CreatureType::BigBird
+        {
+            if c_water_depth >= 1.0 {
+                // Submerged in water: creature floats and swims towards land
+                let float_offset = match creature.creature_type {
+                    CreatureType::Alien => 1.25,
+                    CreatureType::Triangaroo => 0.85,
+                    CreatureType::Polypug => 0.45,
+                    CreatureType::Fox => 0.35,
+                    _ => 0.4,
+                };
+                let bob = (time.elapsed_secs() * 3.0 + (entity.to_bits() as f32)).sin() * 0.05;
+                let target_y = water_level - float_offset + bob;
+                creature.position.y += (target_y - creature.position.y) * 4.0 * dt;
+                creature.velocity.y = 0.0;
+                creature.is_grounded = false;
+
+                // Sample 4 directions to swim back toward land/shallow ground
+                let samples = [
+                    Vec3::new(0.0, 0.0, -1.0),
+                    Vec3::new(0.0, 0.0, 1.0),
+                    Vec3::new(-1.0, 0.0, 0.0),
+                    Vec3::new(1.0, 0.0, 0.0),
+                ];
+                let mut best_dir = Vec3::ZERO;
+                let mut max_h = -999.0;
+                for &d in &samples {
+                    let sample_pos = creature.position + d * 3.0;
+                    let h = get_effective_floor_height(
+                        sample_pos,
+                        get_bilinear_height(sample_pos.x, sample_pos.z, &map),
+                    );
+                    if h > max_h {
+                        max_h = h;
+                        best_dir = d;
+                    }
+                }
+                if best_dir != Vec3::ZERO {
+                    creature.yaw = best_dir.z.atan2(best_dir.x);
+                    creature.velocity = best_dir * 1.0;
+                    let vel = creature.velocity;
+                    creature.position += vel * dt;
+                }
+
+                // Dynamic water wave ripple generation
+                if creature.velocity.length() > 0.1 {
+                    impulse_writer.write(crate::map_editor::WaterImpulseEvent {
+                        position: creature.position,
+                        force: 0.12,
+                        radius: 1.5,
+                    });
+                }
+            } else {
+                // On land: check if future position enters deep water and steer back
+                let next_pos = creature.position
+                    + Vec3::new(creature.yaw.cos(), 0.0, creature.yaw.sin()) * 1.5 * dt;
+                let next_terrain = get_bilinear_height(next_pos.x, next_pos.z, &map);
+                let next_ground = get_effective_floor_height(next_pos, next_terrain);
+                if water_level - next_ground >= 0.8 {
+                    creature.yaw += std::f32::consts::PI + (rand::random::<f32>() - 0.5) * 0.8;
+                    creature.wander_timer = 1.2;
+                }
+            }
         }
 
         let dist_to_player = creature.position.distance(player_pos);
@@ -881,7 +1274,10 @@ pub fn creature_ai_system(
             CreatureType::Polypug => {
                 // Quadruped wandering AI
                 let terrain_y = get_bilinear_height(creature.position.x, creature.position.z, &map);
-                creature.position.y = get_effective_floor_height(creature.position, terrain_y);
+                let ground_y = get_effective_floor_height(creature.position, terrain_y);
+                if c_water_depth < 1.0 {
+                    creature.position.y = ground_y;
+                }
 
                 creature.wander_timer -= dt;
                 if creature.wander_timer <= 0.0 {
@@ -906,7 +1302,10 @@ pub fn creature_ai_system(
 
             CreatureType::Fox => {
                 let terrain_y = get_bilinear_height(creature.position.x, creature.position.z, &map);
-                creature.position.y = get_effective_floor_height(creature.position, terrain_y);
+                let ground_y = get_effective_floor_height(creature.position, terrain_y);
+                if c_water_depth < 1.0 {
+                    creature.position.y = ground_y;
+                }
 
                 creature.wander_timer -= dt;
 
@@ -953,6 +1352,91 @@ pub fn creature_ai_system(
                 creature.position += dir * 5.5 * dt;
                 creature.position.y = 12.0 + (time.elapsed_secs() * 0.4).sin() * 1.5; // slow sinus bobbing
             }
+            CreatureType::BigBird => {
+                // Giant Eagle AI: Flying -> Descending / Landing -> Landed / Perching -> Taking Off cycle!
+                let terrain_y = get_bilinear_height(creature.position.x, creature.position.z, &map);
+                let floor_y = get_effective_floor_height(creature.position, terrain_y);
+
+                match creature.state {
+                    CreatureState::Wandering => {
+                        // Cruising Overhead Phase (Circles in sky at Y = 18.0)
+                        creature.yaw += 0.45 * dt;
+                        let dir = Vec3::new(creature.yaw.cos(), 0.0, creature.yaw.sin());
+                        creature.position += dir * 6.5 * dt;
+                        let sky_y =
+                            (floor_y + 18.0).max(16.0) + (time.elapsed_secs() * 0.5).sin() * 1.5;
+                        creature.position.y += (sky_y - creature.position.y) * 2.0 * dt;
+                        creature.is_grounded = false;
+
+                        // Countdown to Landing Phase
+                        creature.wander_timer -= dt;
+                        if creature.wander_timer <= 0.0 {
+                            creature.state = CreatureState::Landing;
+                            creature.wander_timer = 8.0; // Max glide down timeout
+                        }
+                    }
+                    CreatureState::Landing => {
+                        // Descending/Landing Phase: Glides gracefully down to the terrain floor
+                        creature.yaw += 0.2 * dt;
+                        let dir = Vec3::new(creature.yaw.cos(), 0.0, creature.yaw.sin());
+                        creature.position += dir * 4.5 * dt;
+
+                        // Descent rate
+                        let target_ground_y = floor_y + 0.6;
+                        if creature.position.y > target_ground_y {
+                            creature.position.y -= 4.0 * dt;
+                        } else {
+                            // Touchdown! Transition to Landed Perching state
+                            creature.position.y = target_ground_y;
+                            creature.state = CreatureState::Idle;
+                            creature.is_grounded = true;
+                            creature.wander_timer = 6.0 + rand::random::<f32>() * 8.0; // Perch duration on ground (6-14s)
+                        }
+
+                        creature.wander_timer -= dt;
+                        if creature.wander_timer <= 0.0 {
+                            // Timeout fallback -> land immediately
+                            creature.position.y = target_ground_y;
+                            creature.state = CreatureState::Idle;
+                            creature.is_grounded = true;
+                            creature.wander_timer = 8.0;
+                        }
+                    }
+                    CreatureState::Idle => {
+                        // Landed / Perching Phase: Sitting on ground, pecking at earth, watching player
+                        creature.position.y = floor_y + 0.6;
+                        creature.is_grounded = true;
+
+                        // Spooked by player getting too close (< 7 meters) or taking damage
+                        if dist_to_player < 7.0 && player.health > 0.0 {
+                            creature.state = CreatureState::TakingOff;
+                            creature.wander_timer = 0.0;
+                        } else {
+                            creature.wander_timer -= dt;
+                            if creature.wander_timer <= 0.0 {
+                                // Spontaneously take off back into sky!
+                                creature.state = CreatureState::TakingOff;
+                            }
+                        }
+                    }
+                    CreatureState::TakingOff => {
+                        // Ascending Phase: Launches into air and climbs back up to cruising altitude
+                        creature.yaw += 0.5 * dt;
+                        let dir = Vec3::new(creature.yaw.cos(), 0.0, creature.yaw.sin());
+                        creature.position += dir * 6.0 * dt;
+                        creature.position.y += 5.5 * dt; // Rapid climb!
+                        creature.is_grounded = false;
+
+                        let target_sky_y = (floor_y + 18.0).max(16.0);
+                        if creature.position.y >= target_sky_y {
+                            // Reached cruising altitude! Back to Wandering/Cruising state
+                            creature.state = CreatureState::Wandering;
+                            creature.wander_timer = 12.0 + rand::random::<f32>() * 12.0; // Cruise for 12-24 seconds
+                        }
+                    }
+                    _ => {}
+                }
+            }
             CreatureType::Monster => {
                 // Red glowing beast AI (chasing / aggressive)
                 let terrain_y = get_bilinear_height(creature.position.x, creature.position.z, &map);
@@ -973,8 +1457,23 @@ pub fn creature_ai_system(
 
                     // Attack trigger if next to player
                     if dist_to_player < 1.6 && creature.attack_cooldown <= 0.0 {
-                        player.health = (player.health - 20.0).max(0.0);
+                        let mut dmg = 20.0f32;
+                        if inventory.shield_timer > 0.0 {
+                            dmg = 0.0;
+                        } else {
+                            dmg *= inventory.equipped_armor.damage_multiplier();
+                        }
+                        player.health = (player.health - dmg).max(0.0);
                         creature.attack_cooldown = 1.8;
+
+                        if player.health <= 0.0 && player.health_packs > 0 {
+                            player.health_packs -= 1;
+                            player.health = 35.0;
+                            crate::play_mode::inventory_log(&format!(
+                                "🚨 EMERGENCY RESCUE! Auto-consumed Health Pack on fatal damage! Revived with 35 HP ({} Health Packs remaining)",
+                                player.health_packs
+                            ));
+                        }
 
                         // Push player back
                         let push_back = to_player * 6.0;
@@ -1002,7 +1501,10 @@ pub fn creature_ai_system(
             CreatureType::Alien => {
                 // Neutral NPC villager — only hostile if provoked by player attacks
                 let terrain_y = get_bilinear_height(creature.position.x, creature.position.z, &map);
-                creature.position.y = get_effective_floor_height(creature.position, terrain_y);
+                let ground_y = get_effective_floor_height(creature.position, terrain_y);
+                if c_water_depth < 1.0 {
+                    creature.position.y = ground_y;
+                }
 
                 // Handle aggro cooldown
                 if let Some(ref mut aggro) = aggro_opt
@@ -1027,8 +1529,24 @@ pub fn creature_ai_system(
                     creature.position += vel * dt;
 
                     if dist_to_player < 1.8 && creature.attack_cooldown <= 0.0 {
-                        player.health = (player.health - 15.0).max(0.0);
+                        let mut dmg = 15.0f32;
+                        if inventory.shield_timer > 0.0 {
+                            dmg = 0.0;
+                        } else {
+                            dmg *= inventory.equipped_armor.damage_multiplier();
+                        }
+                        player.health = (player.health - dmg).max(0.0);
                         creature.attack_cooldown = 2.0;
+
+                        if player.health <= 0.0 && player.health_packs > 0 {
+                            player.health_packs -= 1;
+                            player.health = 35.0;
+                            crate::play_mode::inventory_log(&format!(
+                                "🚨 EMERGENCY RESCUE! Auto-consumed Health Pack on fatal damage! Revived with 35 HP ({} Health Packs remaining)",
+                                player.health_packs
+                            ));
+                        }
+
                         crate::play_mode::inventory_log("🛸 An Alien struck you! -15 HP");
                     }
                 } else {
@@ -1134,6 +1652,7 @@ pub fn creature_ai_system(
         // Apply Wall Collisions
         let creature_radius = match creature.creature_type {
             CreatureType::Monster => 1.2,
+            CreatureType::BigBird => 0.8,
             CreatureType::Triangaroo => 0.4,
             CreatureType::Fox => 0.3,
             CreatureType::Alien => 0.5,
@@ -1178,15 +1697,20 @@ pub fn creature_ai_system(
         if let Some(mut phys_pos) = phys_pos_opt {
             phys_pos.0 = creature.position;
         }
-        // Different creatures have different front-facing orientations in their source GLB.
+
+        // Adjust yaw offset so the mesh faces forward along the movement vector
         let yaw_offset = match creature.creature_type {
-            CreatureType::Triangaroo => 0.0, // Face direction of motion instead of sideways
-            CreatureType::Polypug | CreatureType::Monster => 0.0,
-            CreatureType::Fox => 0.0,
-            CreatureType::Alien => 0.0,
-            CreatureType::RobotTrilobite => 0.0,
+            // If it's walking facing to its right, use -FRAC_PI_2:
+            CreatureType::RobotTrilobite => std::f32::consts::FRAC_PI_2,
+            CreatureType::Fox => std::f32::consts::FRAC_PI_2,
+
+            // (If it turns out to face the opposite sideways direction, use +FRAC_PI_2)
+            CreatureType::Triangaroo => std::f32::consts::FRAC_PI_2,
+            CreatureType::Polypug | CreatureType::Monster => std::f32::consts::FRAC_PI_2,
+            CreatureType::Alien => -std::f32::consts::FRAC_PI_2,
             _ => -std::f32::consts::FRAC_PI_2,
         };
+
         transform.rotation = Quat::from_rotation_y(-creature.yaw + yaw_offset);
     }
 }
@@ -1270,8 +1794,15 @@ pub fn creature_animation_sync_system(
         for child in children.iter() {
             if let Ok((mut wing_transform, wing)) = wing_query.get_mut(child) {
                 // Wing flapping animation
-                let flap_speed = 18.0;
-                let flap_angle = (t * flap_speed).sin() * 0.45;
+                let flap_angle = match creature.creature_type {
+                    CreatureType::BigBird => match creature.state {
+                        CreatureState::TakingOff => (t * 16.0).sin() * 0.55,
+                        CreatureState::Landing => (t * 6.0).sin() * 0.25 + 0.1,
+                        CreatureState::Idle => -0.55,
+                        _ => (t * 8.0).sin() * 0.4,
+                    },
+                    _ => (t * 18.0).sin() * 0.45,
+                };
                 if wing.is_left {
                     wing_transform.rotation = Quat::from_rotation_z(-flap_angle);
                 } else {
@@ -1362,29 +1893,57 @@ pub fn creature_skeletal_animation_system(
             CreatureType::Alien => {
                 // Procedural bone animation for the alien (bones: armLeft, armRight, legLeft, legRight, head, body)
                 let speed = creature.velocity.length();
-                let walk_cycle = (t * speed * 6.0).sin();
+                let is_swimming = !creature.is_grounded;
 
-                if name_str == "legLeft" {
-                    let swing = walk_cycle * 0.5 * (speed / 2.0).min(1.0);
-                    transform.rotation = rest_quat * Quat::from_rotation_x(swing);
-                } else if name_str == "legRight" {
-                    let swing = -walk_cycle * 0.5 * (speed / 2.0).min(1.0);
-                    transform.rotation = rest_quat * Quat::from_rotation_x(swing);
-                } else if name_str == "armLeft" {
-                    let swing = -walk_cycle * 0.35 * (speed / 2.0).min(1.0);
-                    transform.rotation = rest_quat * Quat::from_rotation_x(swing);
-                } else if name_str == "armRight" {
-                    let swing = walk_cycle * 0.35 * (speed / 2.0).min(1.0);
-                    transform.rotation = rest_quat * Quat::from_rotation_x(swing);
-                } else if name_str == "head" {
-                    let look = (t * 1.5).sin() * 0.2;
-                    transform.rotation = rest_quat * Quat::from_rotation_y(look);
+                if is_swimming {
+                    let swim_cycle = (t * 5.0).sin();
+                    if name_str == "legLeft" {
+                        let stroke = swim_cycle * 0.4;
+                        transform.rotation = rest_quat * Quat::from_rotation_x(stroke);
+                    } else if name_str == "legRight" {
+                        let stroke = -swim_cycle * 0.4;
+                        transform.rotation = rest_quat * Quat::from_rotation_x(stroke);
+                    } else if name_str == "armLeft" {
+                        let stroke = swim_cycle * 0.6 - 0.4;
+                        transform.rotation =
+                            rest_quat * Quat::from_rotation_x(stroke) * Quat::from_rotation_z(-0.3);
+                    } else if name_str == "armRight" {
+                        let stroke = -swim_cycle * 0.6 - 0.4;
+                        transform.rotation =
+                            rest_quat * Quat::from_rotation_x(stroke) * Quat::from_rotation_z(0.3);
+                    } else if name_str == "head" {
+                        let look = (t * 1.5).sin() * 0.15;
+                        transform.rotation = rest_quat * Quat::from_rotation_y(look);
+                    }
+                } else {
+                    let walk_cycle = (t * speed * 6.0).sin();
+                    if name_str == "legLeft" {
+                        let swing = walk_cycle * 0.5 * (speed / 2.0).min(1.0);
+                        transform.rotation = rest_quat * Quat::from_rotation_x(swing);
+                    } else if name_str == "legRight" {
+                        let swing = -walk_cycle * 0.5 * (speed / 2.0).min(1.0);
+                        transform.rotation = rest_quat * Quat::from_rotation_x(swing);
+                    } else if name_str == "armLeft" {
+                        let swing = -walk_cycle * 0.35 * (speed / 2.0).min(1.0);
+                        transform.rotation = rest_quat * Quat::from_rotation_x(swing);
+                    } else if name_str == "armRight" {
+                        let swing = walk_cycle * 0.35 * (speed / 2.0).min(1.0);
+                        transform.rotation = rest_quat * Quat::from_rotation_x(swing);
+                    } else if name_str == "head" {
+                        let look = (t * 1.5).sin() * 0.2;
+                        transform.rotation = rest_quat * Quat::from_rotation_y(look);
+                    }
                 }
             }
 
             CreatureType::Polypug | CreatureType::Monster => {
                 // Quadruped walking legs swing using speed-scaled sine wave
-                let speed = creature.velocity.length();
+                // Stop feet completely when idle
+                let speed = if creature.state == CreatureState::Idle {
+                    0.0
+                } else {
+                    creature.velocity.length()
+                };
                 let walk_amplitude = (speed * 0.15).min(0.45);
                 let walk_angle = (t * 11.0).sin() * walk_amplitude;
 
@@ -1443,6 +2002,11 @@ fn spawn_death_loot_mesh(
             Color::srgb(0.8, 0.8, 0.9),
             "alien_feather",
         ),
+        CreatureType::BigBird => (
+            meshes.add(Sphere::new(0.25)),
+            Color::srgb(1.0, 0.75, 0.2),
+            "alien_feather",
+        ),
         CreatureType::Monster => (
             meshes.add(Cuboid::new(0.3, 0.3, 0.3)),
             Color::srgb(1.0, 0.8, 0.0),
@@ -1459,6 +2023,41 @@ fn spawn_death_loot_mesh(
             "robot_parts",
         ),
     };
+    let ammo_drop = match c_type {
+        CreatureType::Triangaroo => crate::play_mode::AmmoDrop {
+            kangaroo_fur: 1,
+            ..default()
+        },
+        CreatureType::Polypug => crate::play_mode::AmmoDrop {
+            alien_pelt: 1,
+            ..default()
+        },
+        CreatureType::Fox => crate::play_mode::AmmoDrop {
+            fox_pelt: 1,
+            ..default()
+        },
+        CreatureType::Bird => crate::play_mode::AmmoDrop {
+            alien_feather: 1,
+            ..default()
+        },
+        CreatureType::BigBird => crate::play_mode::AmmoDrop {
+            alien_feather: 3,
+            fox_pelt: 1,
+            ..default()
+        },
+        CreatureType::Monster => crate::play_mode::AmmoDrop {
+            monster_core: 1,
+            ..default()
+        },
+        CreatureType::Alien => crate::play_mode::AmmoDrop {
+            alien_tech: 1,
+            ..default()
+        },
+        CreatureType::RobotTrilobite => crate::play_mode::AmmoDrop {
+            robot_parts: 1,
+            ..default()
+        },
+    };
 
     commands.spawn((
         Mesh3d(mesh),
@@ -1474,10 +2073,12 @@ fn spawn_death_loot_mesh(
             ..default()
         })),
         Transform::from_translation(pos),
+        ammo_drop,
+        crate::play_mode::SpinDrop,
         crate::play_mode::PlayModeEntity,
     ));
 
-    crate::play_mode::inventory_log(&format!("🎁 Creature dropped: {}!", name));
+    crate::play_mode::inventory_log(&format!("🎁 Creature dropped loot item: {}!", name));
 }
 
 fn spawn_alien_house(
