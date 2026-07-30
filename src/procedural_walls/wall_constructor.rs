@@ -11,13 +11,19 @@ use bevy::prelude::{Transform, Vec2, Vec3};
 use fastrand::Rng;
 
 // High-fidelity rectangular chiseled dimensions (approx 2.5:1 ratio)
+#[allow(dead_code)]
 const BRICK_WIDTH: f32 = 0.55;
+#[allow(dead_code)]
 const BRICK_WIDTH_VARIANCE: f32 = 0.15;
 
+#[allow(dead_code)]
 const BRICK_HEIGHT: f32 = 0.22;
+#[allow(dead_code)]
 const BRICK_HEIGHT_VARIANCE: f32 = 0.05;
 
+#[allow(dead_code)]
 const BRICK_DEPTH: f32 = 0.35;
+#[allow(dead_code)]
 const BRICK_DEPTH_VARIANCE: f32 = 0.08;
 
 pub struct WallConstructor;
@@ -28,10 +34,32 @@ impl WallConstructor {
         wall_height: f32,
         get_ground_y: impl Fn(Vec3) -> f32,
     ) -> Vec<Brick> {
+        Self::from_curve_with_style(
+            curve,
+            wall_height,
+            super::WallStyle::ClassicBrick,
+            get_ground_y,
+        )
+    }
+
+    pub fn from_curve_with_style(
+        curve: &Curve,
+        wall_height: f32,
+        style: super::WallStyle,
+        get_ground_y: impl Fn(Vec3) -> f32,
+    ) -> Vec<Brick> {
         let mut rng = fastrand::Rng::with_seed(0);
 
+        let (brick_w, brick_h, _brick_d, width_variance, height_variance) = match style {
+            super::WallStyle::ClassicBrick => (0.55, 0.22, 0.35, 0.15, 0.05),
+            super::WallStyle::PalisadeFence => (0.28, wall_height, 0.28, 0.04, 0.0),
+            super::WallStyle::GraniteFortress => (0.75, 0.38, 0.48, 0.15, 0.05),
+            super::WallStyle::LogTimber => (0.95, 0.26, 0.32, 0.12, 0.03),
+            super::WallStyle::CyberMetal => (0.55, 0.32, 0.32, 0.08, 0.02),
+        };
+
         let wall_length: f32 = curve.length;
-        let bricks_per_row = (wall_length / BRICK_WIDTH).ceil().max(1.0) as usize;
+        let bricks_per_row = (wall_length / brick_w).ceil().max(1.0) as usize;
 
         // Calculate curve span and vertical top in world space using true ground heights
         let mut min_y = f32::INFINITY;
@@ -49,7 +77,7 @@ impl WallConstructor {
         let max_span = (top_y - min_y).max(wall_height);
 
         // Calculate rows globally from the flat top down to the lowest ground
-        let max_row_count = (max_span / BRICK_HEIGHT).ceil().max(1.0) as usize;
+        let max_row_count = (max_span / brick_h).ceil().max(1.0) as usize;
 
         let mut bricks = Vec::with_capacity(
             max_row_count * bricks_per_row + (max_row_count * bricks_per_row) / 3,
@@ -59,7 +87,7 @@ impl WallConstructor {
         let mut perturbed: Vec<f32> = Vec::with_capacity(bricks_per_row + 2);
         let mut brick_row: Vec<Brick> = Vec::with_capacity(bricks_per_row + bricks_per_row / 2);
 
-        let rows = random_splits(max_row_count, BRICK_HEIGHT_VARIANCE / max_span, &mut rng);
+        let rows = random_splits(max_row_count, height_variance / max_span, &mut rng);
 
         for r in 0..max_row_count {
             let row_u = rows[r];
@@ -67,7 +95,7 @@ impl WallConstructor {
             // Stagger alternate rows (running bond pattern!)
             let is_odd = r % 2 == 1;
             split_points.clear();
-            if is_odd {
+            if is_odd && style != super::WallStyle::PalisadeFence {
                 split_points.push(0.0);
                 for k in 1..=bricks_per_row {
                     let u = (k as f32 - 0.5) / (bricks_per_row as f32);
@@ -85,7 +113,7 @@ impl WallConstructor {
             perturbed.clear();
             perturb_splits_into(
                 &split_points,
-                BRICK_WIDTH_VARIANCE / wall_length,
+                width_variance / wall_length,
                 &mut rng,
                 &mut perturbed,
             );
@@ -94,7 +122,7 @@ impl WallConstructor {
             let brick_height = if let Some(&next_row_u) = rows.get(r + 1) {
                 (next_row_u - row_u) * max_span
             } else {
-                BRICK_HEIGHT + (rng.f32() - 0.5) * BRICK_HEIGHT_VARIANCE
+                brick_h + (rng.f32() - 0.5) * height_variance
             };
 
             brick_row.clear();

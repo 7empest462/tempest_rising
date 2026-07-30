@@ -41,6 +41,17 @@ impl Plugin for ProceduralWallsPlugin {
             );
     }
 }
+/// Selectable visual and material style for procedural wall curve construction
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WallStyle {
+    #[default]
+    ClassicBrick,
+    PalisadeFence,
+    GraniteFortress,
+    LogTimber,
+    CyberMetal,
+}
+
 /// Active builder state for placing procedural wall curves
 #[derive(Resource)]
 pub struct ProceduralWallBuilder {
@@ -48,6 +59,8 @@ pub struct ProceduralWallBuilder {
     pub points: Vec<Vec3>,
     /// Selected height for the wall (adjustable dynamically!)
     pub height: f32,
+    /// Selected wall style
+    pub style: WallStyle,
     /// Whether build mode is toggled active (play mode only)
     pub active: bool,
     /// Current hovered target point under cursor
@@ -59,6 +72,7 @@ impl Default for ProceduralWallBuilder {
         Self {
             points: Vec::new(),
             height: 2.4, // Default wall height
+            style: WallStyle::ClassicBrick,
             active: false,
             hover_point: None,
         }
@@ -72,6 +86,7 @@ impl Default for ProceduralWallBuilder {
 pub struct ProceduralWallPreviewCache {
     pub points: Vec<Vec3>,
     pub height: f32,
+    pub style: WallStyle,
     pub cached_bricks: Vec<Brick>,
     pub cached_voussoirs: Vec<ArchBrick>,
 }
@@ -89,6 +104,10 @@ pub struct BrickSpawnAnimation {
 /// Marker component for each individual generated wall brick entity
 #[derive(Component)]
 pub struct ProceduralBrick;
+
+/// Marker component for clay red brick masonry walls (enables arch spawning & gateway carving)
+#[derive(Component)]
+pub struct ProceduralMasonryBrick;
 
 /// Marker component for voussoir (arch) bricks — sub-type of ProceduralBrick.
 /// Both components are present on arch bricks, so mining/health work automatically.
@@ -330,6 +349,7 @@ fn update_wall_builder(
     mouse_input: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
     map: Res<TempestMap>,
@@ -533,168 +553,198 @@ fn update_wall_builder(
         || gamepad_build)
         && builder.points.len() >= 2
     {
-        // =========================================================================
-        // ACTIVE TEXTURE CONFIGURATION (Choose your cozy wall style here!):
-        // - "textures/solid_stone.png"     -> Real Single Solid Stone Granite Blocks (Active Default)
-        // - "textures/solid_brick.png"     -> Real Single Solid Baked Red Clay Bricks
-        // - "textures/solid_limestone.png" -> Real Single Solid Cream Limestone Blocks
-        // =========================================================================
-        let active_texture = "textures/solid_brick.png";
-
+        let style = builder.style;
         let raw_curve = Curve::from(builder.points.clone()).smooth(2);
-        // Ensure even segment lengths for beautiful bricks
-        let resampled_curve = raw_curve.resample(0.8);
-        let bricks = WallConstructor::from_curve(&resampled_curve, builder.height, |pos| {
-            get_bilinear_height(pos.x, pos.z, &map)
-        });
-        let adjacency = compute_brick_adjacency(&bricks);
-        let active_texture_handle = asset_server.load(active_texture);
 
-        // Determine base color tint depending on selected block style
-        let (base_r, base_g, base_b) = match active_texture {
-            "textures/solid_stone.png" => (0.62, 0.62, 0.64), // Raw chiseled granite gray stone
-            "textures/solid_brick.png" => (0.76, 0.44, 0.30), // Earthy terracotta baked clay
-            "textures/solid_limestone.png" => (0.85, 0.82, 0.74), // Warm medieval cream limestone
-            _ => (0.62, 0.48, 0.42),                          // Default brown
-        };
-
-        // Determine mortar color depending on selected block style
-        let mortar_color = match active_texture {
-            "textures/solid_stone.png" => Color::srgb(0.78, 0.78, 0.76), // Cement/concrete gray mortar
-            "textures/solid_brick.png" => Color::srgb(0.88, 0.86, 0.82), // Warm creamy off-white mortar
-            "textures/solid_limestone.png" => Color::srgb(0.68, 0.66, 0.62), // Sandstone dark gray mortar
-            _ => Color::srgb(0.80, 0.80, 0.80),
-        };
-        let mortar_material = materials.add(StandardMaterial {
-            base_color: mortar_color,
-            perceptual_roughness: 0.95,
-            metallic: 0.0,
-            ..default()
-        });
-
-        let mut rng = rand::rng();
-
-        for (idx, brick) in bricks.iter().enumerate() {
-            // Organic shade-by-shade block variation for natural, hand-laid masonry look
-            let r_off: f32 = (rng.random::<f32>() - 0.5) * 0.12;
-            let g_off: f32 = (rng.random::<f32>() - 0.5) * 0.10;
-            let b_off: f32 = (rng.random::<f32>() - 0.5) * 0.10;
-            let brick_color = Color::srgba(
-                (base_r + r_off).clamp(0.0_f32, 1.0_f32),
-                (base_g + g_off).clamp(0.0_f32, 1.0_f32),
-                (base_b + b_off).clamp(0.0_f32, 1.0_f32),
-                1.0,
-            );
-
-            // Spawn parent container (invisible pivot, handles physics and mining damage)
-            let brick_pos = brick.transform.translation;
-            let stagger_delay = brick.pivot_uv.y * 0.35 + brick.pivot_uv.x * 0.15; // Stagger from bottom-left to top-right
-            commands
-                .spawn((
-                    ProceduralBrick,
-                    Hittable,
-                    Health::new(35.0),
-                    brick.transform.with_scale(brick.transform.scale * 0.01), // Start near-zero to animate in (avoids parry3d BVH panic with zero-scale colliders)
-                    // Collider is added after the drop-and-bounce spawn animation completes to avoid heavy BVH refitting/stuttering every frame!
-                    BrickSpawnAnimation {
-                        target_translation: brick.transform.translation,
-                        target_scale: brick.transform.scale,
-                        delay: stagger_delay,
-                        elapsed: 0.0,
-                        duration: 0.42,
-                    },
-                    Visibility::default(),
-                    InheritedVisibility::default(),
-                ))
-                .with_children(|parent| {
-                    // If a neighbor is missing (e.g. at wall boundaries, around doors, or skipped on the top row),
-                    // the corresponding face is exposed to air and must be capped with full stone and recessed mortar.
-                    let brick_adjacency = adjacency[idx];
-                    let is_left = brick_adjacency.is_left_edge;
-                    let is_right = brick_adjacency.is_right_edge;
-                    let is_top = brick_adjacency.is_top_edge;
-                    let is_bottom = brick_adjacency.is_bottom_edge;
-
-                    // Calculate Stone visual shrinkage: do not shrink edges exposed to the outer borders or empty space!
-                    let left_shrink = if is_left { 0.0 } else { 0.02 };
-                    let right_shrink = if is_right { 0.0 } else { 0.02 };
-                    let bottom_shrink = if is_bottom { 0.0 } else { 0.02 };
-                    let top_shrink = if is_top { 0.0 } else { 0.02 };
-
-                    let rel_x = ((brick.transform.scale.x - (left_shrink + right_shrink))
-                        / brick.transform.scale.x)
-                        .max(0.1);
-                    let rel_y = ((brick.transform.scale.y - (bottom_shrink + top_shrink))
-                        / brick.transform.scale.y)
-                        .max(0.1);
-
-                    // Offsets must be in parent-local space (divided by parent scale) so stone actually reaches the boundary edge!
-                    let trans_x = (left_shrink - right_shrink) / (2.0 * brick.transform.scale.x);
-                    let trans_y = (bottom_shrink - top_shrink) / (2.0 * brick.transform.scale.y);
-
-                    // Child 1: The textured, organically colored stone/brick block (shifted flush with borders)
-                    parent.spawn((
-                        Mesh3d(procedural_wall_assets.unit_cube.clone()),
-                        MeshMaterial3d(materials.add(StandardMaterial {
-                            base_color: brick_color,
-                            base_color_texture: Some(active_texture_handle.clone()),
-                            perceptual_roughness: 0.88,
-                            metallic: 0.02,
-                            ..default()
-                        })),
-                        Transform {
-                            translation: Vec3::new(trans_x, trans_y, 0.0), // Flush offset, centered depth
-                            scale: Vec3::new(rel_x, rel_y, 1.05), // Slightly thicker depth to cover both faces
-                            ..default()
-                        },
-                    ));
-
-                    // Calculate Mortar joint shrinkage: pull back from outer boundary edges to prevent sticking out!
-                    let mortar_left_inset = if is_left { 0.04 } else { 0.0 };
-                    let mortar_right_inset = if is_right { 0.04 } else { 0.0 };
-                    let mortar_bottom_inset = if is_bottom { 0.04 } else { 0.0 };
-                    let mortar_top_inset = if is_top { 0.04 } else { 0.0 };
-
-                    let mortar_rel_x =
-                        1.02 - (mortar_left_inset + mortar_right_inset) / brick.transform.scale.x;
-                    let mortar_rel_y =
-                        1.02 - (mortar_top_inset + mortar_bottom_inset) / brick.transform.scale.y;
-
-                    // Mortar offsets also in parent-local space
-                    let mortar_trans_x =
-                        (mortar_left_inset - mortar_right_inset) / (2.0 * brick.transform.scale.x);
-                    let mortar_trans_y =
-                        (mortar_bottom_inset - mortar_top_inset) / (2.0 * brick.transform.scale.y);
-
-                    // Child 2: The solid colored recessed mortar backing (pulled back from outer edges)
-                    parent.spawn((
-                        Mesh3d(procedural_wall_assets.unit_cube.clone()),
-                        MeshMaterial3d(mortar_material.clone()),
-                        Transform {
-                            translation: Vec3::new(mortar_trans_x, mortar_trans_y, 0.0), // Centered mortar fill
-                            scale: Vec3::new(mortar_rel_x.max(0.1), mortar_rel_y.max(0.1), 0.80),
-                            ..default()
-                        },
-                    ));
+        match style {
+            WallStyle::PalisadeFence => {
+                let resampled_curve = raw_curve.resample(1.2);
+                spawn_procedural_palisade_fence(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    &asset_server,
+                    &resampled_curve,
+                    builder.height,
+                    |pos| get_bilinear_height(pos.x, pos.z, &map),
+                );
+            }
+            WallStyle::GraniteFortress => {
+                let resampled_curve = raw_curve.resample(2.4);
+                spawn_procedural_granite_fortress(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    &asset_server,
+                    &resampled_curve,
+                    builder.height,
+                    |pos| get_bilinear_height(pos.x, pos.z, &map),
+                );
+            }
+            WallStyle::LogTimber => {
+                let resampled_curve = raw_curve.resample(2.4);
+                spawn_procedural_log_timber(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    &asset_server,
+                    &resampled_curve,
+                    builder.height,
+                    |pos| get_bilinear_height(pos.x, pos.z, &map),
+                );
+            }
+            WallStyle::CyberMetal => {
+                let resampled_curve = raw_curve.resample(2.4);
+                spawn_procedural_cyber_metal(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    &asset_server,
+                    &resampled_curve,
+                    builder.height,
+                    |pos| get_bilinear_height(pos.x, pos.z, &map),
+                );
+            }
+            WallStyle::ClassicBrick => {
+                let resampled_curve = raw_curve.resample(0.8);
+                let bricks = WallConstructor::from_curve_with_style(
+                    &resampled_curve,
+                    builder.height,
+                    style,
+                    |pos| get_bilinear_height(pos.x, pos.z, &map),
+                );
+                let adjacency = compute_brick_adjacency(&bricks);
+                let active_texture_handle = Some(asset_server.load("textures/solid_brick.png"));
+                let mortar_material = materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.88, 0.86, 0.82),
+                    perceptual_roughness: 0.85,
+                    metallic: 0.0,
+                    ..default()
                 });
 
-            // Spawn satisfying "construction dust/sparks" along the wall
-            if rng.random::<f32>() < 0.25 {
-                commands.spawn((
-                    Mesh3d(procedural_wall_assets.dust_mesh.clone()),
-                    MeshMaterial3d(procedural_wall_assets.dust_material.clone()),
-                    Transform::from_translation(brick_pos),
-                    Particle {
-                        velocity: Vec3::new(
-                            rng.random::<f32>() - 0.5,
-                            rng.random::<f32>() * 1.5,
-                            rng.random::<f32>() - 0.5,
-                        ),
-                        lifetime: Timer::from_seconds(0.7, TimerMode::Once),
-                    },
-                ));
+                let mut rng = rand::rng();
+
+                for (idx, brick) in bricks.iter().enumerate() {
+                    let r_off: f32 = (rng.random::<f32>() - 0.5) * 0.12;
+                    let g_off: f32 = (rng.random::<f32>() - 0.5) * 0.10;
+                    let b_off: f32 = (rng.random::<f32>() - 0.5) * 0.10;
+                    let brick_color = Color::srgba(
+                        (0.76 + r_off).clamp(0.0_f32, 1.0_f32),
+                        (0.44 + g_off).clamp(0.0_f32, 1.0_f32),
+                        (0.30 + b_off).clamp(0.0_f32, 1.0_f32),
+                        1.0,
+                    );
+
+                    let brick_pos = brick.transform.translation;
+                    let stagger_delay = brick.pivot_uv.y * 0.35 + brick.pivot_uv.x * 0.15;
+                    commands
+                        .spawn((
+                            ProceduralBrick,
+                            ProceduralMasonryBrick,
+                            Hittable,
+                            Health::new(35.0),
+                            brick.transform.with_scale(brick.transform.scale * 0.01),
+                            BrickSpawnAnimation {
+                                target_translation: brick.transform.translation,
+                                target_scale: brick.transform.scale,
+                                delay: stagger_delay,
+                                elapsed: 0.0,
+                                duration: 0.42,
+                            },
+                            Visibility::default(),
+                            InheritedVisibility::default(),
+                        ))
+                        .with_children(|parent| {
+                            let brick_adjacency = adjacency[idx];
+                            let is_left = brick_adjacency.is_left_edge;
+                            let is_right = brick_adjacency.is_right_edge;
+                            let is_top = brick_adjacency.is_top_edge;
+                            let is_bottom = brick_adjacency.is_bottom_edge;
+
+                            let left_shrink = if is_left { 0.0 } else { 0.02 };
+                            let right_shrink = if is_right { 0.0 } else { 0.02 };
+                            let bottom_shrink = if is_bottom { 0.0 } else { 0.02 };
+                            let top_shrink = if is_top { 0.0 } else { 0.02 };
+
+                            let rel_x = ((brick.transform.scale.x - (left_shrink + right_shrink))
+                                / brick.transform.scale.x)
+                                .max(0.1);
+                            let rel_y = ((brick.transform.scale.y - (bottom_shrink + top_shrink))
+                                / brick.transform.scale.y)
+                                .max(0.1);
+
+                            let trans_x =
+                                (left_shrink - right_shrink) / (2.0 * brick.transform.scale.x);
+                            let trans_y =
+                                (bottom_shrink - top_shrink) / (2.0 * brick.transform.scale.y);
+
+                            parent.spawn((
+                                Mesh3d(procedural_wall_assets.unit_cube.clone()),
+                                MeshMaterial3d(materials.add(StandardMaterial {
+                                    base_color: brick_color,
+                                    base_color_texture: active_texture_handle.clone(),
+                                    perceptual_roughness: 0.85,
+                                    metallic: 0.0,
+                                    ..default()
+                                })),
+                                Transform {
+                                    translation: Vec3::new(trans_x, trans_y, 0.0),
+                                    scale: Vec3::new(rel_x, rel_y, 1.05),
+                                    ..default()
+                                },
+                            ));
+
+                            let mortar_left_inset = if is_left { 0.04 } else { 0.0 };
+                            let mortar_right_inset = if is_right { 0.04 } else { 0.0 };
+                            let mortar_bottom_inset = if is_bottom { 0.04 } else { 0.0 };
+                            let mortar_top_inset = if is_top { 0.04 } else { 0.0 };
+
+                            let mortar_rel_x = 1.02
+                                - (mortar_left_inset + mortar_right_inset)
+                                    / brick.transform.scale.x;
+                            let mortar_rel_y = 1.02
+                                - (mortar_top_inset + mortar_bottom_inset)
+                                    / brick.transform.scale.y;
+
+                            let mortar_trans_x = (mortar_left_inset - mortar_right_inset)
+                                / (2.0 * brick.transform.scale.x);
+                            let mortar_trans_y = (mortar_bottom_inset - mortar_top_inset)
+                                / (2.0 * brick.transform.scale.y);
+
+                            parent.spawn((
+                                Mesh3d(procedural_wall_assets.unit_cube.clone()),
+                                MeshMaterial3d(mortar_material.clone()),
+                                Transform {
+                                    translation: Vec3::new(mortar_trans_x, mortar_trans_y, 0.0),
+                                    scale: Vec3::new(
+                                        mortar_rel_x.max(0.1),
+                                        mortar_rel_y.max(0.1),
+                                        0.80,
+                                    ),
+                                    ..default()
+                                },
+                            ));
+                        });
+
+                    if rng.random::<f32>() < 0.25 {
+                        commands.spawn((
+                            Mesh3d(procedural_wall_assets.dust_mesh.clone()),
+                            MeshMaterial3d(procedural_wall_assets.dust_material.clone()),
+                            Transform::from_translation(brick_pos),
+                            Particle {
+                                velocity: Vec3::new(
+                                    rng.random::<f32>() - 0.5,
+                                    rng.random::<f32>() * 1.5,
+                                    rng.random::<f32>() - 0.5,
+                                ),
+                                lifetime: Timer::from_seconds(0.7, TimerMode::Once),
+                            },
+                        ));
+                    }
+                }
             }
         }
+
         builder.points.clear();
         builder.hover_point = None;
         if is_play {
@@ -823,6 +873,315 @@ fn spawn_arch_voussoirs(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Procedural Palisade Fence Spawner (Vertical Cylindrical Wooden Stakes & Iron Straps)
+// ---------------------------------------------------------------------------
+fn spawn_procedural_palisade_fence(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    asset_server: &Res<AssetServer>,
+    curve: &Curve,
+    wall_height: f32,
+    get_ground_y: impl Fn(Vec3) -> f32,
+) {
+    let wood_mat = materials.add(StandardMaterial {
+        base_color_texture: Some(asset_server.load("textures/wood_planks.png")),
+        perceptual_roughness: 0.90,
+        ..default()
+    });
+    let strap_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.22, 0.22, 0.25),
+        metallic: 0.85,
+        perceptual_roughness: 0.35,
+        ..default()
+    });
+
+    let stake_radius = 0.09;
+    let stake_mesh = meshes.add(Cylinder::new(stake_radius, wall_height));
+
+    for i in 0..curve.points.len().saturating_sub(1) {
+        let p0 = curve.points[i];
+        let p1 = curve.points[i + 1];
+        let seg_vec = p1 - p0;
+        let seg_len = seg_vec.length();
+        if seg_len < 0.05 {
+            continue;
+        }
+
+        let dir = seg_vec / seg_len;
+        let yaw = dir.z.atan2(dir.x);
+        let rot = Quat::from_rotation_y(-yaw);
+
+        // Spawn vertical wooden stakes spaced 0.25m apart along segment
+        let stake_spacing = 0.25;
+        let stake_count = (seg_len / stake_spacing).round().max(1.0) as usize;
+        for s in 0..stake_count {
+            let t = (s as f32 + 0.5) / (stake_count as f32);
+            let pos = p0 + seg_vec * t;
+            let gy = get_ground_y(pos);
+            let stake_pos = Vec3::new(pos.x, gy + wall_height * 0.5, pos.z);
+
+            commands.spawn((
+                ProceduralBrick,
+                Hittable,
+                Health::new(35.0),
+                Mesh3d(stake_mesh.clone()),
+                MeshMaterial3d(wood_mat.clone()),
+                Transform::from_translation(stake_pos),
+                avian3d::prelude::RigidBody::Static,
+                avian3d::prelude::Collider::cylinder(stake_radius, wall_height),
+                crate::play_mode::PlayModeEntity,
+            ));
+        }
+
+        // Horizontal Iron Binding Straps along segment
+        let midpoint = (p0 + p1) * 0.5;
+        let gy = get_ground_y(midpoint);
+        let strap_mesh = meshes.add(Cuboid::new(0.22, 0.06, seg_len));
+
+        for sy_offset in [0.35 * wall_height, 0.75 * wall_height] {
+            let strap_pos = Vec3::new(midpoint.x, gy + sy_offset, midpoint.z);
+            commands.spawn((
+                Mesh3d(strap_mesh.clone()),
+                MeshMaterial3d(strap_mat.clone()),
+                Transform::from_translation(strap_pos)
+                    .with_rotation(rot * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
+                crate::play_mode::PlayModeEntity,
+            ));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Procedural Granite Fortress Wall Spawner (Solid Granite Blocks + Battlements)
+// ---------------------------------------------------------------------------
+fn spawn_procedural_granite_fortress(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    asset_server: &Res<AssetServer>,
+    curve: &Curve,
+    wall_height: f32,
+    get_ground_y: impl Fn(Vec3) -> f32,
+) {
+    let stone_mat = materials.add(StandardMaterial {
+        base_color_texture: Some(asset_server.load("textures/solid_stone.png")),
+        perceptual_roughness: 0.95,
+        metallic: 0.0,
+        reflectance: 0.05,
+        ..default()
+    });
+
+    let wall_thickness = 0.6;
+    let merlon_height = 0.6;
+
+    for i in 0..curve.points.len().saturating_sub(1) {
+        let p0 = curve.points[i];
+        let p1 = curve.points[i + 1];
+        let seg_vec = p1 - p0;
+        let seg_len = seg_vec.length();
+        if seg_len < 0.05 {
+            continue;
+        }
+
+        let dir = seg_vec / seg_len;
+        let yaw = dir.z.atan2(dir.x);
+        let rot = Quat::from_rotation_y(-yaw) * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+
+        let midpoint = (p0 + p1) * 0.5;
+        let gy = get_ground_y(midpoint);
+        let wall_pos = Vec3::new(midpoint.x, gy + wall_height * 0.5, midpoint.z);
+
+        // Solid granite main wall block
+        let wall_mesh = meshes.add(Cuboid::new(wall_thickness, wall_height, seg_len));
+        commands.spawn((
+            ProceduralBrick,
+            Hittable,
+            Health::new(60.0),
+            Mesh3d(wall_mesh),
+            MeshMaterial3d(stone_mat.clone()),
+            Transform::from_translation(wall_pos).with_rotation(rot),
+            avian3d::prelude::RigidBody::Static,
+            avian3d::prelude::Collider::cuboid(wall_thickness, wall_height, seg_len),
+            crate::play_mode::PlayModeEntity,
+        ));
+
+        // Battlements / Merlon Crenellations on top edge
+        let merlon_spacing = 0.9;
+        let merlon_count = (seg_len / merlon_spacing).round().max(1.0) as usize;
+        let merlon_mesh = meshes.add(Cuboid::new(wall_thickness, merlon_height, 0.5));
+
+        for m in 0..merlon_count {
+            if m % 2 == 0 {
+                let t = (m as f32 + 0.5) / (merlon_count as f32);
+                let m_pos_xz = p0 + seg_vec * t;
+                let m_pos = Vec3::new(
+                    m_pos_xz.x,
+                    gy + wall_height + merlon_height * 0.5,
+                    m_pos_xz.z,
+                );
+                commands.spawn((
+                    Mesh3d(merlon_mesh.clone()),
+                    MeshMaterial3d(stone_mat.clone()),
+                    Transform::from_translation(m_pos).with_rotation(rot),
+                    avian3d::prelude::RigidBody::Static,
+                    avian3d::prelude::Collider::cuboid(wall_thickness, merlon_height, 0.5),
+                    crate::play_mode::PlayModeEntity,
+                ));
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Procedural Log Cabin Timber Wall Spawner (Horizontal Stacked Round Logs & Corner Posts)
+// ---------------------------------------------------------------------------
+fn spawn_procedural_log_timber(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    asset_server: &Res<AssetServer>,
+    curve: &Curve,
+    wall_height: f32,
+    get_ground_y: impl Fn(Vec3) -> f32,
+) {
+    let wood_mat = materials.add(StandardMaterial {
+        base_color_texture: Some(asset_server.load("textures/wood_planks.png")),
+        perceptual_roughness: 0.85,
+        ..default()
+    });
+
+    let log_radius = 0.14;
+    let log_diameter = log_radius * 2.0;
+    let log_count = (wall_height / (log_diameter * 0.95)).ceil().max(1.0) as usize;
+
+    for i in 0..curve.points.len().saturating_sub(1) {
+        let p0 = curve.points[i];
+        let p1 = curve.points[i + 1];
+        let seg_vec = p1 - p0;
+        let seg_len = seg_vec.length();
+        if seg_len < 0.05 {
+            continue;
+        }
+
+        let dir = seg_vec / seg_len;
+        let yaw = dir.z.atan2(dir.x);
+        let rot = Quat::from_rotation_y(-yaw);
+
+        let midpoint = (p0 + p1) * 0.5;
+        let gy = get_ground_y(midpoint);
+
+        let log_mesh = meshes.add(Cylinder::new(log_radius, seg_len));
+
+        // Horizontally stacked round logs along segment
+        for r in 0..log_count {
+            let ly = gy + (r as f32 * log_diameter * 0.92) + log_radius;
+            let log_pos = Vec3::new(midpoint.x, ly, midpoint.z);
+
+            commands.spawn((
+                ProceduralBrick,
+                Hittable,
+                Health::new(45.0),
+                Mesh3d(log_mesh.clone()),
+                MeshMaterial3d(wood_mat.clone()),
+                Transform::from_translation(log_pos)
+                    .with_rotation(rot * Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
+                avian3d::prelude::RigidBody::Static,
+                avian3d::prelude::Collider::cylinder(log_radius, seg_len),
+                crate::play_mode::PlayModeEntity,
+            ));
+        }
+
+        // Vertical corner post at segment joints
+        let corner_mesh = meshes.add(Cuboid::new(0.3, wall_height, 0.3));
+        for pt in [p0, p1] {
+            let p_gy = get_ground_y(pt);
+            let corner_pos = Vec3::new(pt.x, p_gy + wall_height * 0.5, pt.z);
+            commands.spawn((
+                Mesh3d(corner_mesh.clone()),
+                MeshMaterial3d(wood_mat.clone()),
+                Transform::from_translation(corner_pos),
+                avian3d::prelude::RigidBody::Static,
+                avian3d::prelude::Collider::cuboid(0.3, wall_height, 0.3),
+                crate::play_mode::PlayModeEntity,
+            ));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Procedural Cyber Metal Wall Spawner (Solid Alloy Panel + Cyan Glowing Conduit Lines)
+// ---------------------------------------------------------------------------
+fn spawn_procedural_cyber_metal(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    asset_server: &Res<AssetServer>,
+    curve: &Curve,
+    wall_height: f32,
+    get_ground_y: impl Fn(Vec3) -> f32,
+) {
+    let metal_mat = materials.add(StandardMaterial {
+        base_color_texture: Some(asset_server.load("textures/cyber_door.png")),
+        metallic: 0.9,
+        perceptual_roughness: 0.25,
+        ..default()
+    });
+    let cyan_emissive_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.0, 0.85, 1.0),
+        emissive: LinearRgba::new(0.5, 6.0, 10.0, 1.0),
+        unlit: true,
+        ..default()
+    });
+
+    let panel_thickness = 0.3;
+
+    for i in 0..curve.points.len().saturating_sub(1) {
+        let p0 = curve.points[i];
+        let p1 = curve.points[i + 1];
+        let seg_vec = p1 - p0;
+        let seg_len = seg_vec.length();
+        if seg_len < 0.05 {
+            continue;
+        }
+
+        let dir = seg_vec / seg_len;
+        let yaw = dir.z.atan2(dir.x);
+        let rot = Quat::from_rotation_y(-yaw) * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+
+        let midpoint = (p0 + p1) * 0.5;
+        let gy = get_ground_y(midpoint);
+        let wall_pos = Vec3::new(midpoint.x, gy + wall_height * 0.5, midpoint.z);
+
+        // Solid cyber metal alloy panel
+        let panel_mesh = meshes.add(Cuboid::new(panel_thickness, wall_height, seg_len));
+        commands.spawn((
+            ProceduralBrick,
+            Hittable,
+            Health::new(50.0),
+            Mesh3d(panel_mesh),
+            MeshMaterial3d(metal_mat.clone()),
+            Transform::from_translation(wall_pos).with_rotation(rot),
+            avian3d::prelude::RigidBody::Static,
+            avian3d::prelude::Collider::cuboid(panel_thickness, wall_height, seg_len),
+            crate::play_mode::PlayModeEntity,
+        ));
+
+        // Horizontal Cyan Emissive Light Conduit Lines along panel
+        let conduit_mesh = meshes.add(Cuboid::new(panel_thickness + 0.04, 0.06, seg_len));
+        for cy_offset in [0.3 * wall_height, 0.75 * wall_height] {
+            let conduit_pos = Vec3::new(midpoint.x, gy + cy_offset, midpoint.z);
+            commands.spawn((
+                Mesh3d(conduit_mesh.clone()),
+                MeshMaterial3d(cyan_emissive_mat.clone()),
+                Transform::from_translation(conduit_pos).with_rotation(rot),
+                crate::play_mode::PlayModeEntity,
+            ));
+        }
+    }
+}
+
 /// Renders a real-time holographic brick/curve blueprint projection in the game world
 fn draw_wall_preview(
     mut gizmos: Gizmos,
@@ -860,29 +1219,35 @@ fn draw_wall_preview(
         }
     }
 
-    // Invalidate/rebuild cache if builder points or height changed
-    let cache_valid =
-        cache.points == builder.points && (cache.height - builder.height).abs() < 0.001;
+    // Invalidate/rebuild cache if builder points, height, or style changed
+    let cache_valid = cache.points == builder.points
+        && (cache.height - builder.height).abs() < 0.001
+        && cache.style == builder.style;
     if !cache_valid {
         cache.points = builder.points.clone();
         cache.height = builder.height;
+        cache.style = builder.style;
         cache.cached_bricks.clear();
         cache.cached_voussoirs.clear();
 
         if builder.points.len() >= 2 {
             let raw_curve = Curve::from(builder.points.clone()).smooth(2);
             let resampled_curve = raw_curve.resample(0.8);
-            cache.cached_bricks =
-                WallConstructor::from_curve(&resampled_curve, builder.height, |pos| {
-                    get_bilinear_height(pos.x, pos.z, &map)
-                });
+            cache.cached_bricks = WallConstructor::from_curve_with_style(
+                &resampled_curve,
+                builder.height,
+                builder.style,
+                |pos| get_bilinear_height(pos.x, pos.z, &map),
+            );
 
             // Draw holographic arch preview arcs over any detected gap between the
-            // preview wall endpoints and nearby existing bricks / the wall itself.
-            if let (Some(&first_pt), Some(&last_pt)) = (
-                resampled_curve.points.first(),
-                resampled_curve.points.last(),
-            ) {
+            // preview wall endpoints and nearby existing bricks / the wall itself (ClassicBrick only).
+            if builder.style == WallStyle::ClassicBrick
+                && let (Some(&first_pt), Some(&last_pt)) = (
+                    resampled_curve.points.first(),
+                    resampled_curve.points.last(),
+                )
+            {
                 let span_xz = Vec2::new(last_pt.x - first_pt.x, last_pt.z - first_pt.z);
                 let span = span_xz.length();
                 if (MIN_ARCH_SPAN..=MAX_ARCH_SPAN).contains(&span) {
@@ -900,6 +1265,14 @@ fn draw_wall_preview(
         }
     }
 
+    let gizmo_color = match builder.style {
+        WallStyle::ClassicBrick => Color::srgba(0.9, 0.65, 0.1, 0.45),
+        WallStyle::PalisadeFence => Color::srgba(0.2, 0.85, 0.35, 0.50),
+        WallStyle::GraniteFortress => Color::srgba(0.5, 0.6, 0.8, 0.50),
+        WallStyle::LogTimber => Color::srgba(0.85, 0.5, 0.2, 0.50),
+        WallStyle::CyberMetal => Color::srgba(0.0, 0.9, 1.0, 0.55),
+    };
+
     // Render holographic translucent brick layout projection from cache
     for brick in &cache.cached_bricks {
         gizmos.primitive_3d(
@@ -909,7 +1282,7 @@ fn draw_wall_preview(
                 (brick.transform.scale.z - 0.04).max(0.1),
             ),
             Isometry3d::new(brick.transform.translation, brick.transform.rotation),
-            Color::srgba(0.9, 0.65, 0.1, 0.42),
+            gizmo_color,
         );
     }
 
@@ -999,7 +1372,10 @@ fn carve_gateways(
         Option<&crate::play_mode::PlayModeCamera>,
         Option<&crate::map_editor::EditorCamera>,
     )>,
-    brick_query: Query<(Entity, &GlobalTransform, &Health, &Transform), With<ProceduralBrick>>,
+    brick_query: Query<
+        (Entity, &GlobalTransform, &Health, &Transform),
+        With<ProceduralMasonryBrick>,
+    >,
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
     procedural_wall_assets: Res<ProceduralWallAssets>,
@@ -1227,7 +1603,7 @@ fn detect_and_spawn_arches(
             &Transform,
             Option<&BrickSpawnAnimation>,
         ),
-        (With<ProceduralBrick>, Without<ProceduralArchBrick>),
+        (With<ProceduralMasonryBrick>, Without<ProceduralArchBrick>),
     >,
     root_query: Query<Entity>,
     mut materials: ResMut<Assets<StandardMaterial>>,

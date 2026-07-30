@@ -118,8 +118,11 @@ fn main_menu_ui(
                 next_state.set(AppState::MapEditor);
             }
 
-            if ui.button("🎨 Open Sprite Editor").clicked() {
-                println!("Open Sprite Editor clicked!");
+            if ui
+                .button("🎨 Open Custom Asset Studio (Flags & Reticles)")
+                .clicked()
+            {
+                println!("Open Custom Asset Studio clicked!");
                 next_state.set(AppState::SpriteEditor);
             }
 

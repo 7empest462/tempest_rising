@@ -1,6 +1,6 @@
 use crate::AppState;
 use crate::character_designer::{
-    CharacterSettings, Gender, HairStyle, build_skeletal_limb_mesh, build_stylized_bone_mesh,
+    CharacterSettings, build_skeletal_limb_mesh, build_stylized_bone_mesh,
 };
 use crate::map_editor::data::TempestMap;
 use crate::map_editor::{SplatmapSettings, WaterImpulseEvent, WaterSettings, generate_water_mesh};
@@ -159,7 +159,9 @@ pub struct StarshipPlasmaBolt {
     pub lifetime: f32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum AxeTier {
     #[default]
     Wood,
@@ -190,7 +192,7 @@ impl AxeTier {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ArmorTier {
     #[default]
     None,
@@ -199,6 +201,183 @@ pub enum ArmorTier {
     Steel,
     Platinum,
     FlightSuit,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SaveData {
+    pub wood: u32,
+    pub rock: u32,
+    pub copper: u32,
+    pub iron: u32,
+    pub gold: u32,
+    pub silver: u32,
+    pub platinum: u32,
+    pub granite: u32,
+    pub steel: u32,
+    pub fox_pelt: u32,
+    pub alien_pelt: u32,
+    pub kangaroo_fur: u32,
+    pub alien_feather: u32,
+    pub monster_core: u32,
+    pub alien_tech: u32,
+    pub robot_parts: u32,
+    pub crystal_shard: u32,
+    pub ship_repair_steel: u32,
+    pub ship_repair_platinum: u32,
+    pub ship_repair_crystals: u32,
+    pub ship_repair_robot_parts: u32,
+    pub ship_repair_alien_tech: u32,
+    pub starship_repaired: bool,
+    pub equipped_axe: AxeTier,
+    pub equipped_armor: ArmorTier,
+    pub has_flight_suit: bool,
+    pub wooden_shelter_parts: u32,
+    pub metal_shelter_parts: u32,
+    pub has_sword: bool,
+    pub has_leather_armor: bool,
+    pub has_recall_beacon: bool,
+    pub player_pos: [f32; 3],
+    pub health: f32,
+    pub max_health: f32,
+    pub ammo_pistol: u32,
+    pub ammo_revolver: u32,
+    pub ammo_rifle: u32,
+    pub ammo_sniper: u32,
+    pub clip_pistol: u32,
+    pub clip_revolver: u32,
+    pub clip_rifle: u32,
+    pub clip_sniper: u32,
+    pub health_packs: u32,
+    pub outfit_style: crate::character_designer::OutfitStyle,
+    pub gender: crate::character_designer::Gender,
+    pub height: f32,
+    pub weight: f32,
+    pub hair_style: crate::character_designer::HairStyle,
+}
+
+pub fn save_progress(
+    inventory: &PlayerInventory,
+    player: &PlayModePlayer,
+    char_settings: &CharacterSettings,
+) -> Result<(), String> {
+    let data = SaveData {
+        wood: inventory.wood,
+        rock: inventory.rock,
+        copper: inventory.copper,
+        iron: inventory.iron,
+        gold: inventory.gold,
+        silver: inventory.silver,
+        platinum: inventory.platinum,
+        granite: inventory.granite,
+        steel: inventory.steel,
+        fox_pelt: inventory.fox_pelt,
+        alien_pelt: inventory.alien_pelt,
+        kangaroo_fur: inventory.kangaroo_fur,
+        alien_feather: inventory.alien_feather,
+        monster_core: inventory.monster_core,
+        alien_tech: inventory.alien_tech,
+        robot_parts: inventory.robot_parts,
+        crystal_shard: inventory.crystal_shard,
+        ship_repair_steel: inventory.ship_repair_steel,
+        ship_repair_platinum: inventory.ship_repair_platinum,
+        ship_repair_crystals: inventory.ship_repair_crystals,
+        ship_repair_robot_parts: inventory.ship_repair_robot_parts,
+        ship_repair_alien_tech: inventory.ship_repair_alien_tech,
+        starship_repaired: inventory.starship_repaired,
+        equipped_axe: inventory.equipped_axe,
+        equipped_armor: inventory.equipped_armor,
+        has_flight_suit: inventory.has_flight_suit,
+        wooden_shelter_parts: inventory.wooden_shelter_parts,
+        metal_shelter_parts: inventory.metal_shelter_parts,
+        has_sword: inventory.has_sword,
+        has_leather_armor: inventory.has_leather_armor,
+        has_recall_beacon: inventory.has_recall_beacon,
+        player_pos: [player.position.x, player.position.y, player.position.z],
+        health: player.health,
+        max_health: player.max_health,
+        ammo_pistol: player.ammo_pistol,
+        ammo_revolver: player.ammo_revolver,
+        ammo_rifle: player.ammo_rifle,
+        ammo_sniper: player.ammo_sniper,
+        clip_pistol: player.clip_pistol,
+        clip_revolver: player.clip_revolver,
+        clip_rifle: player.clip_rifle,
+        clip_sniper: player.clip_sniper,
+        health_packs: player.health_packs,
+        outfit_style: char_settings.outfit_style,
+        gender: char_settings.gender,
+        height: char_settings.height,
+        weight: char_settings.weight,
+        hair_style: char_settings.hair_style,
+    };
+
+    let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
+    std::fs::write("save_game.json", json).map_err(|e| e.to_string())?;
+    inventory_log("💾 Game Progress Saved to 'save_game.json'!");
+    Ok(())
+}
+
+pub fn load_progress(
+    inventory: &mut PlayerInventory,
+    player: &mut PlayModePlayer,
+    char_settings: &mut CharacterSettings,
+) -> Result<(), String> {
+    let json = std::fs::read_to_string("save_game.json").map_err(|e| e.to_string())?;
+    let data: SaveData = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+
+    inventory.wood = data.wood;
+    inventory.rock = data.rock;
+    inventory.copper = data.copper;
+    inventory.iron = data.iron;
+    inventory.gold = data.gold;
+    inventory.silver = data.silver;
+    inventory.platinum = data.platinum;
+    inventory.granite = data.granite;
+    inventory.steel = data.steel;
+    inventory.fox_pelt = data.fox_pelt;
+    inventory.alien_pelt = data.alien_pelt;
+    inventory.kangaroo_fur = data.kangaroo_fur;
+    inventory.alien_feather = data.alien_feather;
+    inventory.monster_core = data.monster_core;
+    inventory.alien_tech = data.alien_tech;
+    inventory.robot_parts = data.robot_parts;
+    inventory.crystal_shard = data.crystal_shard;
+    inventory.ship_repair_steel = data.ship_repair_steel;
+    inventory.ship_repair_platinum = data.ship_repair_platinum;
+    inventory.ship_repair_crystals = data.ship_repair_crystals;
+    inventory.ship_repair_robot_parts = data.ship_repair_robot_parts;
+    inventory.ship_repair_alien_tech = data.ship_repair_alien_tech;
+    inventory.starship_repaired = data.starship_repaired;
+    inventory.equipped_axe = data.equipped_axe;
+    inventory.equipped_armor = data.equipped_armor;
+    inventory.has_flight_suit = data.has_flight_suit;
+    inventory.wooden_shelter_parts = data.wooden_shelter_parts;
+    inventory.metal_shelter_parts = data.metal_shelter_parts;
+    inventory.has_sword = data.has_sword;
+    inventory.has_leather_armor = data.has_leather_armor;
+    inventory.has_recall_beacon = data.has_recall_beacon;
+
+    player.position = Vec3::from_array(data.player_pos);
+    player.health = data.health;
+    player.max_health = data.max_health;
+    player.ammo_pistol = data.ammo_pistol;
+    player.ammo_revolver = data.ammo_revolver;
+    player.ammo_rifle = data.ammo_rifle;
+    player.ammo_sniper = data.ammo_sniper;
+    player.clip_pistol = data.clip_pistol;
+    player.clip_revolver = data.clip_revolver;
+    player.clip_rifle = data.clip_rifle;
+    player.clip_sniper = data.clip_sniper;
+    player.health_packs = data.health_packs;
+
+    char_settings.outfit_style = data.outfit_style;
+    char_settings.gender = data.gender;
+    char_settings.height = data.height;
+    char_settings.weight = data.weight;
+    char_settings.hair_style = data.hair_style;
+
+    inventory_log("📂 Game Progress Loaded successfully!");
+    Ok(())
 }
 
 impl ArmorTier {
@@ -275,6 +454,7 @@ pub enum PlayerState {
     Swimming,
     Flying,
     PilotingStarship,
+    Climbing,
 }
 
 // Verlet physics node matching the design parameters
@@ -426,6 +606,18 @@ pub struct PlaySun {
     pub base_color: Color,
     pub day_intensity: f32,
 }
+
+#[derive(Component)]
+pub struct PlayNightPlanet;
+
+#[derive(Component)]
+pub struct PlayPlanetRings;
+
+#[derive(Component)]
+pub struct PlayBlackHoleMoon;
+
+#[derive(Component)]
+pub struct PlayBlackHoleDiskHoriz;
 
 #[derive(Component)]
 pub struct WallCollider {
@@ -829,7 +1021,7 @@ fn setup_play_mode(
             ..default()
         },
         jump: bevy_tnua::builtins::TnuaBuiltinJumpConfig {
-            height: 2.2,
+            height: 3.5,
             ..default()
         },
         crouch: bevy_tnua::builtins::TnuaBuiltinCrouchConfig {
@@ -858,6 +1050,8 @@ fn setup_play_mode(
         brightness: 450.0,
         ..default()
     });
+    use bevy::light::*;
+    use bevy::pbr::*;
     commands.insert_resource(ClearColor(Color::srgb(0.08, 0.05, 0.14)));
 
     // 2. Golden Sun Sphere & Light with PlaySun component (Distant skybox position)
@@ -867,9 +1061,11 @@ fn setup_play_mode(
             base_color: Color::srgb(1.0, 0.8, 0.6),
             emissive: LinearRgba::from(Color::srgb(10.0, 8.0, 6.0)),
             unlit: true,
+            fog_enabled: false,
             ..default()
         })),
         Transform::from_xyz(2500.0, 2000.0, 1500.0),
+        NotShadowCaster,
         PlaySun {
             id: 0,
             angle_offset: 0.0,
@@ -882,11 +1078,18 @@ fn setup_play_mode(
 
     commands.spawn((
         DirectionalLight {
+            shadow_depth_bias: 0.02,
+            shadow_normal_bias: 1.8,
             illuminance: 9500.0,
             color: Color::srgb(1.0, 0.85, 0.65),
             shadow_maps_enabled: true,
             ..default()
         },
+        CascadeShadowConfigBuilder {
+            maximum_distance: 2500.0,
+            ..default()
+        }
+        .build(),
         Transform::from_xyz(60.0, 50.0, 40.0).looking_at(Vec3::ZERO, Vec3::Y),
         PlaySun {
             id: 0,
@@ -898,20 +1101,22 @@ fn setup_play_mode(
         PlayModeEntity,
     ));
 
-    // 3. Cyan Sun Sphere & Light with PlaySun component (Distant skybox position)
+    // 3. Cyan Sun Sphere & Light with PlaySun component (Distant skybox position, close binary partner)
     commands.spawn((
         Mesh3d(meshes.add(Sphere::new(80.0).mesh().ico(3).unwrap())),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::srgb(0.4, 0.9, 1.0),
             emissive: LinearRgba::from(Color::srgb(4.0, 9.0, 10.0)),
             unlit: true,
+            fog_enabled: false,
             ..default()
         })),
         Transform::from_xyz(-2500.0, 1800.0, -1800.0),
+        NotShadowCaster,
         PlaySun {
             id: 1,
-            angle_offset: 2.2,
-            orbit_speed: 1.3,
+            angle_offset: 0.25,
+            orbit_speed: 1.0,
             base_color: Color::srgb(0.4, 0.9, 1.0),
             day_intensity: 6500.0,
         },
@@ -920,19 +1125,99 @@ fn setup_play_mode(
 
     commands.spawn((
         DirectionalLight {
+            shadow_depth_bias: 0.02,
+            shadow_normal_bias: 1.8,
             illuminance: 6500.0,
             color: Color::srgb(0.45, 0.92, 1.0),
             shadow_maps_enabled: true,
             ..default()
         },
+        CascadeShadowConfigBuilder {
+            maximum_distance: 2500.0,
+            ..default()
+        }
+        .build(),
         Transform::from_xyz(-70.0, 45.0, -50.0).looking_at(Vec3::ZERO, Vec3::Y),
         PlaySun {
             id: 1,
-            angle_offset: 2.2,
-            orbit_speed: 1.3,
+            angle_offset: 0.25,
+            orbit_speed: 1.0,
             base_color: Color::srgb(0.4, 0.9, 1.0),
             day_intensity: 6500.0,
         },
+        PlayModeEntity,
+    ));
+
+    // 4. Large night sky gas giant planet (Neptune/Uranus Cyan-Blue)
+    commands.spawn((
+        Mesh3d(meshes.add(Sphere::new(100.0).mesh().ico(4).unwrap())),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.15, 0.45, 0.90), // Neptune deep cyan-blue
+            emissive: LinearRgba::new(0.6, 1.8, 3.8, 1.0), // vibrant atmospheric glow
+            unlit: true,
+            cull_mode: None,
+            fog_enabled: false,
+            ..default()
+        })),
+        Transform::from_xyz(0.0, -3500.0, 0.0),
+        NotShadowCaster,
+        PlayNightPlanet,
+        PlayModeEntity,
+    ));
+
+    // Gas Giant Rings (Flat double-sided annulus)
+    commands.spawn((
+        Mesh3d(meshes.add(Annulus::new(125.0, 195.0))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgba(0.55, 0.72, 0.95, 0.65),
+            emissive: LinearRgba::new(1.2, 1.8, 2.5, 1.0),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            cull_mode: None,
+            fog_enabled: false,
+            ..default()
+        })),
+        Transform::from_xyz(0.0, -3500.0, 0.0),
+        NotShadowCaster,
+        PlayPlanetRings,
+        PlayModeEntity,
+    ));
+
+    // 5. Gravitational Lensing Black Hole Moon (Event Horizon, Accretion Disks, Thin Einstein Ring Halo)
+    commands.spawn((
+        Mesh3d(meshes.add(Sphere::new(100.0).mesh().ico(4).unwrap())),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::BLACK,
+            unlit: true,
+            fog_enabled: false,
+            ..default()
+        })),
+        Transform::from_xyz(0.0, -3500.0, 0.0),
+        NotShadowCaster,
+        PlayBlackHoleMoon,
+        PlayModeEntity,
+    ));
+
+    // Accretion Disk - Horizontal (Swirling relativistic particle stream accretion disk)
+    let perlin = crate::map_editor::noise::PerlinNoise::new(12345);
+    let accretion_image = generate_accretion_disk_texture(&perlin);
+    let accretion_handle = images.add(accretion_image);
+    commands.spawn((
+        Mesh3d(meshes.add(create_accretion_disk_mesh(140.0, 360.0, 128))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::WHITE,
+            base_color_texture: Some(accretion_handle.clone()),
+            emissive: LinearRgba::new(16.0, 5.0, 0.5, 1.0),
+            emissive_texture: Some(accretion_handle),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            cull_mode: None,
+            fog_enabled: false,
+            ..default()
+        })),
+        Transform::from_xyz(0.0, -3500.0, 0.0),
+        NotShadowCaster,
+        PlayBlackHoleDiskHoriz,
         PlayModeEntity,
     ));
 
@@ -964,7 +1249,11 @@ fn setup_play_mode(
     commands.spawn((
         avian3d::prelude::RigidBody::Static,
         avian3d::prelude::Collider::heightfield(heights, heightfield_scale),
-        Transform::from_xyz(0.0, 0.0, 0.0),
+        Transform::from_xyz(
+            -(map.width as f32 - 1.0) * 0.5,
+            0.0,
+            -(map.height as f32 - 1.0) * 0.5,
+        ),
         PlayModeEntity,
     ));
 
@@ -1062,6 +1351,7 @@ fn setup_play_mode(
             ..default()
         })),
         Transform::from_xyz(0.0, 25.0, 0.0),
+        NotShadowCaster,
         PlayModeCloud,
         PlayModeEntity,
     ));
@@ -1392,8 +1682,105 @@ fn setup_play_mode(
         ..default()
     });
 
+    let muscle_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.72, 0.1, 0.12),
+        perceptual_roughness: 0.6,
+        metallic: 0.1,
+        ..default()
+    });
+
+    // 1. Sci-Fi Suit Materials
+    let scifi_suit_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.12, 0.16, 0.24),
+        metallic: 0.75,
+        perceptual_roughness: 0.25,
+        ..default()
+    });
+    let scifi_visor_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.0, 0.9, 1.0),
+        emissive: LinearRgba::new(0.0, 6.0, 12.0, 1.0),
+        unlit: true,
+        ..default()
+    });
+    let scifi_core_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.45, 0.0),
+        emissive: LinearRgba::new(12.0, 5.0, 0.0, 1.0),
+        unlit: true,
+        ..default()
+    });
+    let scifi_trim_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.85, 0.65, 0.15),
+        metallic: 0.9,
+        perceptual_roughness: 0.2,
+        ..default()
+    });
+
+    // 2. Tactical Armor Materials
+    let tac_vest_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.16, 0.20, 0.16),
+        perceptual_roughness: 0.8,
+        ..default()
+    });
+    let tac_camo_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.10, 0.12, 0.15),
+        perceptual_roughness: 0.85,
+        ..default()
+    });
+    let tac_nvg_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.0, 1.0, 0.4),
+        emissive: LinearRgba::new(0.0, 8.0, 2.0, 1.0),
+        unlit: true,
+        ..default()
+    });
+    let tac_plate_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.06, 0.06, 0.07),
+        metallic: 0.3,
+        perceptual_roughness: 0.4,
+        ..default()
+    });
+
+    // 3. Stylized Hero Materials
+    let hero_jacket_mat = materials.add(StandardMaterial {
+        base_color: if char_settings.gender == crate::character_designer::Gender::Male {
+            Color::srgb(0.75, 0.18, 0.12)
+        } else {
+            Color::srgb(0.12, 0.52, 0.75)
+        },
+        perceptual_roughness: 0.5,
+        ..default()
+    });
+    let hero_pants_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.08, 0.12, 0.22),
+        perceptual_roughness: 0.7,
+        ..default()
+    });
+    let hero_boots_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.15, 0.10, 0.07),
+        perceptual_roughness: 0.6,
+        ..default()
+    });
+    let eye_white_mat = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        perceptual_roughness: 0.1,
+        ..default()
+    });
+    let eye_pupil_mat = materials.add(StandardMaterial {
+        base_color: Color::BLACK,
+        perceptual_roughness: 0.1,
+        ..default()
+    });
+
+    // 4. Skeleton Exo Frame Materials
+    let exo_glass_mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.1, 0.65, 0.95, 0.35),
+        alpha_mode: AlphaMode::Blend,
+        perceptual_roughness: 0.15,
+        ..default()
+    });
+
+    // 5. Classic Materials
     let shirt_mat = materials.add(StandardMaterial {
-        base_color: if char_settings.gender == Gender::Male {
+        base_color: if char_settings.gender == crate::character_designer::Gender::Male {
             Color::srgb(0.1, 0.5, 0.8)
         } else {
             Color::srgb(0.8, 0.15, 0.45)
@@ -1401,35 +1788,35 @@ fn setup_play_mode(
         perceptual_roughness: 0.6,
         ..default()
     });
-
     let pants_mat = materials.add(StandardMaterial {
         base_color: Color::srgb(0.15, 0.18, 0.22),
         perceptual_roughness: 0.8,
         ..default()
     });
-
     let eye_mat = materials.add(StandardMaterial {
         base_color: char_settings.eye_color,
         perceptual_roughness: 0.1,
         ..default()
     });
-
     let hair_mat = materials.add(StandardMaterial {
         base_color: char_settings.hair_color,
         perceptual_roughness: 0.85,
         ..default()
     });
-
     let bone_mat = materials.add(StandardMaterial {
-        base_color: Color::WHITE,
+        base_color: match char_settings.outfit_style {
+            crate::character_designer::OutfitStyle::SkeletonExoFrame => Color::srgb(0.2, 0.9, 1.0),
+            _ => Color::WHITE,
+        },
+        emissive: match char_settings.outfit_style {
+            crate::character_designer::OutfitStyle::SkeletonExoFrame => {
+                LinearRgba::new(2.5, 7.0, 10.0, 1.0)
+            }
+            _ => LinearRgba::BLACK,
+        },
+        unlit: char_settings.outfit_style
+            == crate::character_designer::OutfitStyle::SkeletonExoFrame,
         perceptual_roughness: 0.85,
-        ..default()
-    });
-
-    let muscle_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.72, 0.1, 0.12),
-        perceptual_roughness: 0.6,
-        metallic: 0.1,
         ..default()
     });
 
@@ -1441,15 +1828,52 @@ fn setup_play_mode(
         let is_head = node.name == "Head";
         let is_torso = node.name == "Pelvis" || node.name == "Spine" || node.name == "Chest";
         let is_pants_area = node.name == "Pelvis" || node.name == "L_Hip" || node.name == "R_Hip";
+        let is_foot = node.name == "L_Foot" || node.name == "R_Foot";
 
-        let skin_mat_to_use = if is_head {
-            skin_mat.clone()
-        } else if is_pants_area {
-            pants_mat.clone()
-        } else if is_torso {
-            shirt_mat.clone()
-        } else {
-            skin_mat.clone()
+        let skin_mat_to_use = match char_settings.outfit_style {
+            crate::character_designer::OutfitStyle::SciFiSuit => {
+                if is_head || is_torso || is_pants_area {
+                    scifi_suit_mat.clone()
+                } else if is_foot {
+                    scifi_trim_mat.clone()
+                } else {
+                    scifi_suit_mat.clone()
+                }
+            }
+            crate::character_designer::OutfitStyle::TacticalArmor => {
+                if is_torso || is_pants_area {
+                    tac_vest_mat.clone()
+                } else if is_foot {
+                    tac_plate_mat.clone()
+                } else {
+                    tac_camo_mat.clone()
+                }
+            }
+            crate::character_designer::OutfitStyle::StylizedHero => {
+                if is_head {
+                    skin_mat.clone()
+                } else if is_pants_area {
+                    hero_pants_mat.clone()
+                } else if is_torso {
+                    hero_jacket_mat.clone()
+                } else if is_foot {
+                    hero_boots_mat.clone()
+                } else {
+                    skin_mat.clone()
+                }
+            }
+            crate::character_designer::OutfitStyle::SkeletonExoFrame => exo_glass_mat.clone(),
+            crate::character_designer::OutfitStyle::ClassicMannequin => {
+                if is_head {
+                    skin_mat.clone()
+                } else if is_pants_area {
+                    pants_mat.clone()
+                } else if is_torso {
+                    shirt_mat.clone()
+                } else {
+                    skin_mat.clone()
+                }
+            }
         };
 
         let mesh_radius = node.radius;
@@ -1486,186 +1910,196 @@ fn setup_play_mode(
 
         visual_nodes.insert(node.name.clone(), node_id);
 
-        // Spawn hair & eyes under the Head node
-        if is_head {
-            let eye_mesh = meshes.add(Sphere::new(mesh_radius * 0.2).mesh().ico(3).unwrap());
-
-            let le = commands
-                .spawn((
-                    Mesh3d(eye_mesh.clone()),
-                    MeshMaterial3d(eye_mat.clone()),
-                    Transform::from_translation(Vec3::new(
-                        -mesh_radius * 0.35,
-                        mesh_radius * 0.15,
-                        mesh_radius * 0.85,
-                    )),
-                    PlayModeEntity,
-                ))
-                .id();
-            commands.entity(node_id).add_child(le);
-
-            let re = commands
-                .spawn((
-                    Mesh3d(eye_mesh),
-                    MeshMaterial3d(eye_mat.clone()),
-                    Transform::from_translation(Vec3::new(
+        // Node accessories based on OutfitStyle & Node Name
+        match char_settings.outfit_style {
+            crate::character_designer::OutfitStyle::SciFiSuit => {
+                if is_head {
+                    let visor_mesh = meshes.add(Cuboid::new(
+                        mesh_radius * 1.5,
                         mesh_radius * 0.35,
-                        mesh_radius * 0.15,
-                        mesh_radius * 0.85,
-                    )),
-                    PlayModeEntity,
-                ))
-                .id();
-            commands.entity(node_id).add_child(re);
-
-            match char_settings.hair_style {
-                HairStyle::None => {}
-                HairStyle::Short => {
-                    let cap_mesh =
-                        meshes.add(Sphere::new(mesh_radius * 1.03).mesh().ico(4).unwrap());
-                    let cap = commands
+                        mesh_radius * 0.45,
+                    ));
+                    let visor = commands
                         .spawn((
-                            Mesh3d(cap_mesh),
-                            MeshMaterial3d(hair_mat.clone()),
+                            Mesh3d(visor_mesh),
+                            MeshMaterial3d(scifi_visor_mat.clone()),
                             Transform::from_translation(Vec3::new(
                                 0.0,
-                                mesh_radius * 0.33,
-                                -mesh_radius * 0.15,
+                                mesh_radius * 0.1,
+                                mesh_radius * 0.75,
                             )),
                             PlayModeEntity,
                         ))
                         .id();
-                    commands.entity(node_id).add_child(cap);
+                    commands.entity(node_id).add_child(visor);
 
-                    for i in 0..6 {
-                        let angle = (i as f32) * 0.6 - 1.5;
-                        let strand_mesh =
-                            meshes.add(Sphere::new(mesh_radius * 0.25).mesh().ico(3).unwrap());
-                        let strand = commands
+                    let comm_mesh =
+                        meshes.add(Cylinder::new(mesh_radius * 0.22, mesh_radius * 0.15));
+                    for dir in &[-1.0f32, 1.0f32] {
+                        let comm = commands
                             .spawn((
-                                Mesh3d(strand_mesh),
-                                MeshMaterial3d(hair_mat.clone()),
+                                Mesh3d(comm_mesh.clone()),
+                                MeshMaterial3d(scifi_trim_mat.clone()),
                                 Transform::from_translation(Vec3::new(
-                                    angle * mesh_radius * 0.4,
-                                    mesh_radius * 0.95,
-                                    mesh_radius * 0.3,
+                                    dir * mesh_radius * 0.95,
+                                    mesh_radius * 0.1,
+                                    0.0,
+                                ))
+                                .with_rotation(Quat::from_rotation_z(dir * 1.57)),
+                                PlayModeEntity,
+                            ))
+                            .id();
+                        commands.entity(node_id).add_child(comm);
+                    }
+                } else if node.name == "Chest" {
+                    let core_mesh =
+                        meshes.add(Sphere::new(mesh_radius * 0.42).mesh().ico(3).unwrap());
+                    let core = commands
+                        .spawn((
+                            Mesh3d(core_mesh),
+                            MeshMaterial3d(scifi_core_mat.clone()),
+                            Transform::from_translation(Vec3::new(
+                                0.0,
+                                mesh_radius * 0.2,
+                                mesh_radius * 0.85,
+                            )),
+                            PlayModeEntity,
+                        ))
+                        .id();
+                    commands.entity(node_id).add_child(core);
+                }
+            }
+            crate::character_designer::OutfitStyle::TacticalArmor => {
+                if is_head {
+                    let brim_mesh = meshes.add(Cuboid::new(
+                        mesh_radius * 1.8,
+                        mesh_radius * 0.15,
+                        mesh_radius * 1.8,
+                    ));
+                    let brim = commands
+                        .spawn((
+                            Mesh3d(brim_mesh),
+                            MeshMaterial3d(tac_vest_mat.clone()),
+                            Transform::from_translation(Vec3::new(0.0, mesh_radius * 0.45, 0.0)),
+                            PlayModeEntity,
+                        ))
+                        .id();
+                    commands.entity(node_id).add_child(brim);
+
+                    let nvg_mesh = meshes.add(Cylinder::new(mesh_radius * 0.18, mesh_radius * 0.4));
+                    for dir in &[-0.32f32, 0.32f32] {
+                        let nvg = commands
+                            .spawn((
+                                Mesh3d(nvg_mesh.clone()),
+                                MeshMaterial3d(tac_nvg_mat.clone()),
+                                Transform::from_translation(Vec3::new(
+                                    dir * mesh_radius,
+                                    mesh_radius * 0.25,
+                                    mesh_radius * 0.85,
+                                ))
+                                .with_rotation(Quat::from_rotation_x(1.57)),
+                                PlayModeEntity,
+                            ))
+                            .id();
+                        commands.entity(node_id).add_child(nvg);
+                    }
+                }
+            }
+            crate::character_designer::OutfitStyle::StylizedHero => {
+                if is_head {
+                    let eye_white_mesh =
+                        meshes.add(Sphere::new(mesh_radius * 0.22).mesh().ico(3).unwrap());
+                    let eye_iris_mesh =
+                        meshes.add(Sphere::new(mesh_radius * 0.13).mesh().ico(3).unwrap());
+                    let pupil_mesh =
+                        meshes.add(Sphere::new(mesh_radius * 0.06).mesh().ico(3).unwrap());
+                    let eyebrow_mesh = meshes.add(Cuboid::new(
+                        mesh_radius * 0.35,
+                        mesh_radius * 0.05,
+                        mesh_radius * 0.08,
+                    ));
+
+                    for (side, offset_x) in
+                        [(-1.0f32, -mesh_radius * 0.35), (1.0f32, mesh_radius * 0.35)]
+                    {
+                        let ew = commands
+                            .spawn((
+                                Mesh3d(eye_white_mesh.clone()),
+                                MeshMaterial3d(eye_white_mat.clone()),
+                                Transform::from_translation(Vec3::new(
+                                    offset_x,
+                                    mesh_radius * 0.15,
+                                    mesh_radius * 0.85,
                                 )),
                                 PlayModeEntity,
                             ))
                             .id();
-                        commands.entity(node_id).add_child(strand);
-                    }
-                }
-                HairStyle::Ponytail => {
-                    let cap_mesh =
-                        meshes.add(Sphere::new(mesh_radius * 1.02).mesh().ico(4).unwrap());
-                    let cap = commands
-                        .spawn((
-                            Mesh3d(cap_mesh),
-                            MeshMaterial3d(hair_mat.clone()),
-                            Transform::from_translation(Vec3::new(
-                                0.0,
-                                mesh_radius * 0.33,
-                                -mesh_radius * 0.15,
-                            )),
-                            PlayModeEntity,
-                        ))
-                        .id();
-                    commands.entity(node_id).add_child(cap);
+                        commands.entity(node_id).add_child(ew);
 
-                    let tail_mesh =
-                        meshes.add(Sphere::new(mesh_radius * 0.4).mesh().ico(3).unwrap());
-                    let tail = commands
-                        .spawn((
-                            Mesh3d(tail_mesh),
-                            MeshMaterial3d(hair_mat.clone()),
-                            Transform::from_translation(Vec3::new(
-                                0.0,
-                                mesh_radius * 0.48,
-                                -mesh_radius * 1.15,
-                            )),
-                            PlayModeEntity,
-                        ))
-                        .id();
-                    commands.entity(node_id).add_child(tail);
-                }
-                HairStyle::Spiky => {
-                    let cap_mesh =
-                        meshes.add(Sphere::new(mesh_radius * 1.02).mesh().ico(4).unwrap());
-                    let cap = commands
-                        .spawn((
-                            Mesh3d(cap_mesh),
-                            MeshMaterial3d(hair_mat.clone()),
-                            Transform::from_translation(Vec3::new(
-                                0.0,
-                                mesh_radius * 0.33,
-                                -mesh_radius * 0.15,
-                            )),
-                            PlayModeEntity,
-                        ))
-                        .id();
-                    commands.entity(node_id).add_child(cap);
-
-                    for i in 0..5 {
-                        let angle = (i as f32) * 0.6 - 1.2;
-                        let cone_mesh = meshes.add(
-                            Cone {
-                                radius: mesh_radius * 0.15,
-                                height: mesh_radius * 0.5,
-                            }
-                            .mesh(),
-                        );
-                        let spike = commands
+                        let ei = commands
                             .spawn((
-                                Mesh3d(cone_mesh),
-                                MeshMaterial3d(hair_mat.clone()),
+                                Mesh3d(eye_iris_mesh.clone()),
+                                MeshMaterial3d(eye_mat.clone()),
                                 Transform::from_translation(Vec3::new(
-                                    angle * mesh_radius * 0.5,
-                                    mesh_radius * 0.9,
-                                    mesh_radius * 0.2,
-                                ))
-                                .with_rotation(Quat::from_rotation_z(-angle)),
+                                    offset_x,
+                                    mesh_radius * 0.15,
+                                    mesh_radius * 0.96,
+                                )),
                                 PlayModeEntity,
                             ))
                             .id();
-                        commands.entity(cap).add_child(spike);
+                        commands.entity(node_id).add_child(ei);
+
+                        let ep = commands
+                            .spawn((
+                                Mesh3d(pupil_mesh.clone()),
+                                MeshMaterial3d(eye_pupil_mat.clone()),
+                                Transform::from_translation(Vec3::new(
+                                    offset_x,
+                                    mesh_radius * 0.15,
+                                    mesh_radius * 1.02,
+                                )),
+                                PlayModeEntity,
+                            ))
+                            .id();
+                        commands.entity(node_id).add_child(ep);
+
+                        let eb = commands
+                            .spawn((
+                                Mesh3d(eyebrow_mesh.clone()),
+                                MeshMaterial3d(hair_mat.clone()),
+                                Transform::from_translation(Vec3::new(
+                                    offset_x,
+                                    mesh_radius * 0.38,
+                                    mesh_radius * 0.85,
+                                ))
+                                .with_rotation(Quat::from_rotation_z(side * -0.15)),
+                                PlayModeEntity,
+                            ))
+                            .id();
+                        commands.entity(node_id).add_child(eb);
                     }
                 }
-                HairStyle::Curly => {
-                    let cap_mesh =
-                        meshes.add(Sphere::new(mesh_radius * 1.02).mesh().ico(4).unwrap());
-                    let cap = commands
-                        .spawn((
-                            Mesh3d(cap_mesh),
-                            MeshMaterial3d(hair_mat.clone()),
-                            Transform::from_translation(Vec3::new(
-                                0.0,
-                                mesh_radius * 0.33,
-                                -mesh_radius * 0.15,
-                            )),
-                            PlayModeEntity,
-                        ))
-                        .id();
-                    commands.entity(node_id).add_child(cap);
-
-                    for x in -2..=2 {
-                        for z in -2..=1 {
-                            let curl =
-                                meshes.add(Sphere::new(mesh_radius * 0.22).mesh().ico(3).unwrap());
-                            let curl_ent = commands
-                                .spawn((
-                                    Mesh3d(curl),
-                                    MeshMaterial3d(hair_mat.clone()),
-                                    Transform::from_translation(Vec3::new(
-                                        x as f32 * mesh_radius * 0.35,
-                                        mesh_radius * 0.95,
-                                        z as f32 * mesh_radius * 0.35 - mesh_radius * 0.05,
-                                    )),
-                                    PlayModeEntity,
-                                ))
-                                .id();
-                            commands.entity(cap).add_child(curl_ent);
-                        }
+            }
+            crate::character_designer::OutfitStyle::SkeletonExoFrame
+            | crate::character_designer::OutfitStyle::ClassicMannequin => {
+                if is_head {
+                    let eye_mesh =
+                        meshes.add(Sphere::new(mesh_radius * 0.2).mesh().ico(3).unwrap());
+                    for offset_x in [-mesh_radius * 0.35, mesh_radius * 0.35] {
+                        let e = commands
+                            .spawn((
+                                Mesh3d(eye_mesh.clone()),
+                                MeshMaterial3d(eye_mat.clone()),
+                                Transform::from_translation(Vec3::new(
+                                    offset_x,
+                                    mesh_radius * 0.15,
+                                    mesh_radius * 0.85,
+                                )),
+                                PlayModeEntity,
+                            ))
+                            .id();
+                        commands.entity(node_id).add_child(e);
                     }
                 }
             }
@@ -1754,12 +2188,36 @@ fn setup_play_mode(
 
         let limb_mat = if char_settings.show_xray {
             muscle_mat.clone()
-        } else if is_pants {
-            pants_mat.clone()
-        } else if is_torso {
-            shirt_mat.clone()
         } else {
-            skin_mat.clone()
+            match char_settings.outfit_style {
+                crate::character_designer::OutfitStyle::SciFiSuit => scifi_suit_mat.clone(),
+                crate::character_designer::OutfitStyle::TacticalArmor => {
+                    if is_pants || is_torso {
+                        tac_vest_mat.clone()
+                    } else {
+                        tac_camo_mat.clone()
+                    }
+                }
+                crate::character_designer::OutfitStyle::StylizedHero => {
+                    if is_pants {
+                        hero_pants_mat.clone()
+                    } else if is_torso {
+                        hero_jacket_mat.clone()
+                    } else {
+                        skin_mat.clone()
+                    }
+                }
+                crate::character_designer::OutfitStyle::SkeletonExoFrame => exo_glass_mat.clone(),
+                crate::character_designer::OutfitStyle::ClassicMannequin => {
+                    if is_pants {
+                        pants_mat.clone()
+                    } else if is_torso {
+                        shirt_mat.clone()
+                    } else {
+                        skin_mat.clone()
+                    }
+                }
+            }
         };
 
         if char_settings.show_xray {
@@ -1800,7 +2258,7 @@ fn setup_play_mode(
     commands.spawn((
         Camera3d::default(),
         Projection::Perspective(PerspectiveProjection {
-            far: 500.0,
+            far: 3000.0,
             ..default()
         }),
         Transform::from_xyz(spawn_pos.x, spawn_pos.y + 4.0, spawn_pos.z - 6.0)
@@ -1814,8 +2272,8 @@ fn setup_play_mode(
         DistanceFog {
             color: Color::srgb(0.18, 0.22, 0.45),
             falloff: FogFalloff::Linear {
-                start: 300.0,
-                end: 500.0,
+                start: 1000.0,
+                end: 6500.0,
             },
             ..default()
         },
@@ -2041,6 +2499,7 @@ struct PlayerMovementParams<'w, 's> {
     inventory: ResMut<'w, PlayerInventory>,
     mouse_input: Res<'w, ButtonInput<MouseButton>>,
     puzzle_state: Res<'w, crate::play_mode::house::HousePuzzleState>,
+    ladder_query: Query<'w, 's, &'static GlobalTransform, With<structures::WatchtowerLadder>>,
 }
 
 fn sync_mansion_global_bounds_system(
@@ -2083,11 +2542,18 @@ fn player_movement_and_ragdoll_system(
     mut tnua_query: Query<&mut bevy_tnua::prelude::TnuaController<ControlScheme>>,
     mut velocity_query: Query<&mut avian3d::prelude::LinearVelocity>,
     mut physics_pos_query: Query<&mut avian3d::prelude::Position>,
-    settings: Res<CharacterSettings>,
+    mut settings: ResMut<CharacterSettings>,
 ) {
     let Ok((_player_entity, mut player, mut player_transform)) = player_query.single_mut() else {
         return;
     };
+
+    if keyboard_input.just_pressed(KeyCode::F5) {
+        let _ = save_progress(&params.inventory, &player, &settings);
+    }
+    if keyboard_input.just_pressed(KeyCode::F9) {
+        let _ = load_progress(&mut params.inventory, &mut player, &mut settings);
+    }
     let ui_active = params.inventory.show_ship_repair_window
         || params.inventory.show_alien_store
         || params.puzzle_state.active_terminal_log.is_some()
@@ -2294,11 +2760,12 @@ fn player_movement_and_ragdoll_system(
 
     let p_state = player.state;
 
-    // 2. Active Mode / Swimming Mode / Flying Mode / Piloting Controls
+    // 2. Active Mode / Swimming Mode / Flying Mode / Piloting Controls / Climbing
     if p_state == PlayerState::Active
         || p_state == PlayerState::Swimming
         || p_state == PlayerState::Flying
         || p_state == PlayerState::PilotingStarship
+        || p_state == PlayerState::Climbing
     {
         if p_state == PlayerState::Active {
             let mut move_dir = Vec3::ZERO;
@@ -2360,6 +2827,36 @@ fn player_movement_and_ragdoll_system(
                 speed *= wade_factor;
             }
 
+            // Check Watchtower Ladder climbing proximity
+            let mut near_ladder = None;
+            for ladder_trans in params.ladder_query.iter() {
+                let l_pos = ladder_trans.translation();
+                let horizontal_dist = Vec2::new(
+                    player_transform.translation.x - l_pos.x,
+                    player_transform.translation.z - l_pos.z,
+                )
+                .length();
+                if horizontal_dist < 1.4
+                    && player_transform.translation.y >= l_pos.y - 1.8
+                    && player_transform.translation.y <= l_pos.y + 4.2
+                {
+                    near_ladder = Some((*ladder_trans, l_pos));
+                    break;
+                }
+            }
+
+            if let Some((_ladder_trans, _l_pos)) = near_ladder
+                && (keyboard_input.pressed(KeyCode::KeyW)
+                    || keyboard_input.pressed(KeyCode::Space)
+                    || keyboard_input.pressed(KeyCode::KeyS)
+                    || keyboard_input.pressed(KeyCode::ControlLeft)
+                    || keyboard_input.pressed(KeyCode::KeyC))
+            {
+                player.state = PlayerState::Climbing;
+                player.position = player_transform.translation;
+                inventory_log("🪜 Engaged watchtower ladder — climbing mode active.");
+            }
+
             // Update Tnua walk basis speed dynamically
             if let Ok(tnua_config) = params.player_config_query.get(_player_entity)
                 && let Some(mut config) = params.control_configs.get_mut(&tnua_config.0)
@@ -2380,6 +2877,39 @@ fn player_movement_and_ragdoll_system(
                 player.walk_timer = 0.0;
             }
 
+            let float_height = player.height * 0.5 + 0.08;
+            let terrain_y = get_bilinear_height(
+                player_transform.translation.x,
+                player_transform.translation.z,
+                &map,
+            );
+            let ground_y = get_effective_floor_height(player_transform.translation, terrain_y);
+
+            // Calculate black hole gravitational anomaly boost (higher jump height at night & floaty landing)
+            let bh_boost = get_black_hole_gravity_boost(time.elapsed_secs());
+            if let Ok(tnua_config) = params.player_config_query.get(_player_entity)
+                && let Some(mut config) = params.control_configs.get_mut(&tnua_config.0)
+            {
+                config.jump.height = 3.5 + bh_boost * 24.5;
+            }
+
+            let current_y = player_transform.translation.y - float_height;
+            let is_in_air = (current_y - ground_y) > 0.35;
+
+            // Apply floaty low-gravity anti-gravitational pull during nighttime jump (both ascent and descent)
+            if is_in_air
+                && bh_boost > 0.0
+                && let Ok(mut vel) = velocity_query.get_mut(_player_entity)
+            {
+                if vel.y > 0.0 {
+                    // Ascending: counteract 45% of gravity so upward momentum soars high into the sky!
+                    vel.y += 9.8 * 0.45 * bh_boost * dt;
+                } else {
+                    // Descending: counteract 82% of gravity for slow, graceful moon-landing float!
+                    vel.y += 9.8 * 0.82 * bh_boost * dt;
+                }
+            }
+
             // Feed walk, jump, and crouch inputs to Tnua controller
             if let Ok(mut tnua) = tnua_query.get_mut(_player_entity) {
                 let walk_vel = move_dir.normalize_or_zero() * speed;
@@ -2394,10 +2924,18 @@ fn player_movement_and_ragdoll_system(
                     desired_forward: desired_facing,
                 };
 
-                if keyboard_input.pressed(KeyCode::Space) {
+                if keyboard_input.just_pressed(KeyCode::Space)
+                    || keyboard_input.pressed(KeyCode::Space)
+                {
                     tnua.action(crate::ControlScheme::Jump(
                         bevy_tnua::builtins::TnuaBuiltinJump::default(),
                     ));
+                    if (current_y - ground_y).abs() < 0.35
+                        && let Ok(mut vel) = velocity_query.get_mut(_player_entity)
+                        && vel.y <= 0.5
+                    {
+                        vel.y = 10.0 + bh_boost * 22.0;
+                    }
                 }
                 if keyboard_input.pressed(KeyCode::KeyC)
                     || keyboard_input.pressed(KeyCode::ControlLeft)
@@ -2475,42 +3013,18 @@ fn player_movement_and_ragdoll_system(
 
             let updated_target_y = player_transform.translation.y - float_height;
             let target_visual_y = updated_target_y.max(ground_y);
-            if !player.is_walking && (target_visual_y - ground_y).abs() < 0.08 {
+            let is_airborne = if let Ok(vel) = velocity_query.get(_player_entity) {
+                vel.y.abs() > 0.1 || (updated_target_y - ground_y) > 0.03
+            } else {
+                (updated_target_y - ground_y) > 0.03
+            };
+            if !player.is_walking && !is_airborne && (target_visual_y - ground_y).abs() < 0.04 {
                 player.position.y = ground_y;
             } else {
                 player.position.y = target_visual_y;
             }
         } else {
-            let mut move_dir = Vec3::ZERO;
-
-            let cam_forward = Vec3::new(cam_transform.forward().x, 0.0, cam_transform.forward().z)
-                .normalize_or_zero();
-            let cam_right = Vec3::new(cam_transform.right().x, 0.0, cam_transform.right().z)
-                .normalize_or_zero();
-
-            if keyboard_input.pressed(KeyCode::KeyW) {
-                move_dir += cam_forward;
-            }
-            if keyboard_input.pressed(KeyCode::KeyS) {
-                move_dir -= cam_forward;
-            }
-            if keyboard_input.pressed(KeyCode::KeyA) {
-                move_dir -= cam_right; // Strafe Left
-            }
-            if keyboard_input.pressed(KeyCode::KeyD) {
-                move_dir += cam_right; // Strafe Right
-            }
-
-            player.is_walking = move_dir.length_squared() > 0.001;
-
-            let is_first_person = camera.view_mode == ViewMode::FirstPerson;
-            if is_first_person {
-                player.rotation_yaw = camera.yaw + std::f32::consts::PI;
-            } else {
-                if player.is_walking {
-                    player.rotation_yaw = move_dir.z.atan2(move_dir.x);
-                }
-            }
+            let mut target_pos = player.position;
 
             let terrain_y = get_bilinear_height(player.position.x, player.position.z, &map);
             let (ground_y, _ceiling_y) = get_floor_and_ceiling(player.position, terrain_y);
@@ -2520,41 +3034,133 @@ fn player_movement_and_ragdoll_system(
                 0.0
             };
 
-            let mut speed = if p_state == PlayerState::Swimming {
-                1.5 * player.height
-            } else if p_state == PlayerState::Flying {
-                8.0 * player.height
-            } else {
-                1.25 * player.height
-            };
-            if keyboard_input.pressed(KeyCode::ShiftLeft)
-                || keyboard_input.pressed(KeyCode::ShiftRight)
-            {
-                if p_state == PlayerState::Flying {
-                    speed *= 2.5;
-                } else {
-                    speed *= 2.244;
+            if p_state == PlayerState::Climbing {
+                // Find closest ladder to snap to
+                let mut closest_ladder = None;
+                let mut min_dist = f32::MAX;
+                for ladder_trans in params.ladder_query.iter() {
+                    let l_pos = ladder_trans.translation();
+                    let dist = Vec2::new(player.position.x - l_pos.x, player.position.z - l_pos.z)
+                        .length();
+                    if dist < min_dist {
+                        min_dist = dist;
+                        closest_ladder = Some((*ladder_trans, l_pos));
+                    }
                 }
-            }
 
-            // Wade speed reduction in shallow water
-            if p_state == PlayerState::Active && water_depth > 0.0 {
-                let wade_factor = (1.0 - (water_depth / 1.0) * 0.45).max(0.55);
-                speed *= wade_factor;
-            }
+                if let Some((ladder_trans, l_pos)) = closest_ladder
+                    && min_dist < 2.0
+                {
+                    // Snap XZ to the ladder position
+                    target_pos.x = l_pos.x;
+                    target_pos.z = l_pos.z;
 
-            let mut target_pos = player.position;
-            if player.is_walking {
-                move_dir = move_dir.normalize();
-                target_pos += move_dir * speed * dt;
-                player.walk_timer += dt * speed * 5.0;
-            } else {
-                if p_state == PlayerState::Swimming {
-                    player.walk_timer += dt * 2.0; // Slow gentle floating motion
-                } else if p_state == PlayerState::Flying {
-                    player.walk_timer += dt * 1.5; // Hover motion
+                    let target_top_y = l_pos.y + 3.2;
+
+                    // Manual vertical movement
+                    let mut climb_dir = 0.0;
+                    if keyboard_input.pressed(KeyCode::KeyW)
+                        || keyboard_input.pressed(KeyCode::Space)
+                    {
+                        climb_dir += 1.0;
+                    }
+                    if keyboard_input.pressed(KeyCode::KeyS)
+                        || keyboard_input.pressed(KeyCode::ControlLeft)
+                        || keyboard_input.pressed(KeyCode::KeyC)
+                    {
+                        climb_dir -= 1.0;
+                    }
+
+                    target_pos.y += climb_dir * 3.8 * dt;
+                    player.is_walking = climb_dir != 0.0;
+
+                    // Check boundaries
+                    if target_pos.y >= target_top_y {
+                        // Reached the top! Step onto the deck towards the center
+                        let step_dir = -ladder_trans.right();
+                        target_pos.x += step_dir.x * 1.2;
+                        target_pos.z += step_dir.z * 1.2;
+                        target_pos.y = target_top_y;
+                        player.state = PlayerState::Active;
+                        inventory_log("🪜 Climbed up onto the Watchtower observation deck!");
+                    } else if target_pos.y <= l_pos.y - 1.7 {
+                        // Reached the bottom! Transition back to Active
+                        target_pos.y = l_pos.y - 1.7;
+                        player.state = PlayerState::Active;
+                        inventory_log("🪜 Safely climbed down to the ground.");
+                    }
                 } else {
-                    player.walk_timer = 0.0;
+                    // Lost ladder connection, drop back to Active state
+                    player.state = PlayerState::Active;
+                }
+            } else {
+                let mut move_dir = Vec3::ZERO;
+
+                let cam_forward =
+                    Vec3::new(cam_transform.forward().x, 0.0, cam_transform.forward().z)
+                        .normalize_or_zero();
+                let cam_right = Vec3::new(cam_transform.right().x, 0.0, cam_transform.right().z)
+                    .normalize_or_zero();
+
+                if keyboard_input.pressed(KeyCode::KeyW) {
+                    move_dir += cam_forward;
+                }
+                if keyboard_input.pressed(KeyCode::KeyS) {
+                    move_dir -= cam_forward;
+                }
+                if keyboard_input.pressed(KeyCode::KeyA) {
+                    move_dir -= cam_right; // Strafe Left
+                }
+                if keyboard_input.pressed(KeyCode::KeyD) {
+                    move_dir += cam_right; // Strafe Right
+                }
+
+                player.is_walking = move_dir.length_squared() > 0.001;
+
+                let is_first_person = camera.view_mode == ViewMode::FirstPerson;
+                if is_first_person {
+                    player.rotation_yaw = camera.yaw + std::f32::consts::PI;
+                } else {
+                    if player.is_walking {
+                        player.rotation_yaw = move_dir.z.atan2(move_dir.x);
+                    }
+                }
+
+                let mut speed = if p_state == PlayerState::Swimming {
+                    1.5 * player.height
+                } else if p_state == PlayerState::Flying {
+                    8.0 * player.height
+                } else {
+                    1.25 * player.height
+                };
+                if keyboard_input.pressed(KeyCode::ShiftLeft)
+                    || keyboard_input.pressed(KeyCode::ShiftRight)
+                {
+                    if p_state == PlayerState::Flying {
+                        speed *= 2.5;
+                    } else {
+                        speed *= 2.244;
+                    }
+                }
+
+                // Wade speed reduction in shallow water
+                if p_state == PlayerState::Active && water_depth > 0.0 {
+                    let wade_factor = (1.0 - (water_depth / 1.0) * 0.45).max(0.55);
+                    speed *= wade_factor;
+                }
+
+                if player.is_walking {
+                    move_dir = move_dir.normalize();
+                    target_pos += move_dir * speed * dt;
+                    player.walk_timer += dt * speed * 5.0;
+                } else {
+                    if p_state == PlayerState::Swimming {
+                        player.walk_timer += dt * 2.0; // Slow gentle floating motion
+                    } else if p_state == PlayerState::Flying {
+                        player.walk_timer += dt * 1.5; // Hover motion
+                    } else {
+                        player.walk_timer = 0.0;
+                    }
                 }
             }
 
@@ -3062,10 +3668,10 @@ fn player_movement_and_ragdoll_system(
                     || p_active_weapon == ActiveWeapon::Revolver;
 
                 if is_rifle {
-                    let r_pos = chest_pos + forward * 0.45 + right * 0.12 * p_weight
-                        - Vec3::Y * 0.15 * p_height;
-                    let l_pos = chest_pos + forward * 0.65 + right * 0.02 * p_weight
-                        - Vec3::Y * 0.1 * p_height;
+                    let r_pos = chest_pos + forward * 0.38 + right * 0.04 * p_weight
+                        - Vec3::Y * 0.02 * p_height;
+                    let l_pos = chest_pos + forward * 0.58 - right * 0.02 * p_weight
+                        + Vec3::Y * 0.01 * p_height;
                     nodes[14].position = l_pos;
                     nodes[15].position = r_pos;
 
@@ -3078,9 +3684,9 @@ fn player_movement_and_ragdoll_system(
                         + right * 0.08
                         - forward * 0.06;
                 } else if is_pistol {
-                    let r_pos = chest_pos + forward * 0.45 + right * 0.05 * p_weight
-                        - Vec3::Y * 0.15 * p_height;
-                    let l_pos = r_pos - right * 0.06 * p_weight - forward * 0.03 + Vec3::Y * 0.02;
+                    let r_pos = chest_pos + forward * 0.40 + right * 0.02 * p_weight
+                        - Vec3::Y * 0.12 * p_height;
+                    let l_pos = r_pos - right * 0.03 * p_weight - forward * 0.02 + Vec3::Y * 0.01;
                     nodes[14].position = l_pos;
                     nodes[15].position = r_pos;
 
@@ -3121,16 +3727,76 @@ fn player_movement_and_ragdoll_system(
             nodes[11].position = r_hip;
 
             // Knees dangle downward and slightly back with airflow sway
+            let drag = if p_is_walking { 0.28 } else { 0.08 };
             nodes[9].position =
-                l_hip - Vec3::Y * (p_height * 0.22) - forward * 0.06 + right * (leg_sway * 0.04);
-            nodes[12].position = r_hip - Vec3::Y * (p_height * 0.22) - forward * 0.06
+                l_hip - Vec3::Y * (p_height * 0.20) - forward * drag + right * (leg_sway * 0.04);
+            nodes[12].position = r_hip - Vec3::Y * (p_height * 0.20) - forward * drag
                 + right * (leg_sway_alt * 0.04);
 
             // Feet dangle downward behind knees with airflow sway
-            nodes[10].position = nodes[9].position - Vec3::Y * (p_height * 0.22) - forward * 0.10
-                + right * (leg_sway * 0.06);
-            nodes[13].position = nodes[12].position - Vec3::Y * (p_height * 0.22) - forward * 0.10
-                + right * (leg_sway_alt * 0.06);
+            nodes[10].position =
+                nodes[9].position - Vec3::Y * (p_height * 0.18) - forward * (drag * 1.5)
+                    + right * (leg_sway * 0.06);
+            nodes[13].position =
+                nodes[12].position - Vec3::Y * (p_height * 0.18) - forward * (drag * 1.5)
+                    + right * (leg_sway_alt * 0.06);
+        } else if p_state == PlayerState::Climbing {
+            // LADDER CLIMBING SKELETON ANIMATION
+            let sh_w = settings.shoulder_width;
+            let waist = settings.waist_width;
+
+            let climb_cycle = p_pos.y * 5.0; // Animates based on actual vertical position!
+            let left_hand_up = (climb_cycle).sin() > 0.0;
+            let right_hand_up = !left_hand_up;
+
+            // Body flat against the ladder
+            let pelvis_pos = p_pos + Vec3::Y * (p_height * 0.45);
+            let spine_pos = pelvis_pos + Vec3::Y * (p_height * 0.16);
+            let chest_pos = pelvis_pos + Vec3::Y * (p_height * 0.32);
+            let head_pos = chest_pos + Vec3::Y * (p_height * 0.18);
+
+            nodes[0].position = pelvis_pos;
+            nodes[1].position = spine_pos;
+            nodes[2].position = chest_pos;
+            nodes[3].position = head_pos;
+
+            // Shoulders
+            nodes[4].position = chest_pos - right * 0.25 * p_weight * sh_w; // L_Shoulder
+            nodes[6].position = chest_pos + right * 0.25 * p_weight * sh_w; // R_Shoulder
+
+            // Hands grabbing rungs in front of the chest
+            let l_hand_y = chest_pos.y + if left_hand_up { 0.25 } else { -0.15 };
+            let r_hand_y = chest_pos.y + if right_hand_up { 0.25 } else { -0.15 };
+
+            nodes[14].position = chest_pos - right * 0.15 + forward * 0.25;
+            nodes[14].position.y = l_hand_y; // L_Hand
+            nodes[15].position = chest_pos + right * 0.15 + forward * 0.25;
+            nodes[15].position.y = r_hand_y; // R_Hand
+
+            // Elbows bent outwards
+            nodes[5].position =
+                nodes[4].position + (nodes[14].position - nodes[4].position) * 0.5 - right * 0.08;
+            nodes[7].position =
+                nodes[6].position + (nodes[15].position - nodes[6].position) * 0.5 + right * 0.08;
+
+            // Hips
+            let l_hip = pelvis_pos - right * 0.16 * p_weight * waist;
+            let r_hip = pelvis_pos + right * 0.16 * p_weight * waist;
+            nodes[8].position = l_hip;
+            nodes[11].position = r_hip;
+
+            // Feet stepping on rungs
+            let left_foot_up = !left_hand_up;
+            let l_foot_y = pelvis_pos.y - 0.45 + if left_foot_up { 0.15 } else { -0.15 };
+            let r_foot_y = pelvis_pos.y - 0.45 + if !left_foot_up { 0.15 } else { -0.15 };
+
+            nodes[9].position = l_hip - Vec3::Y * 0.22 + forward * 0.08; // L_Knee
+            nodes[12].position = r_hip - Vec3::Y * 0.22 + forward * 0.08; // R_Knee
+
+            nodes[10].position = nodes[9].position - Vec3::Y * 0.2 + forward * 0.08;
+            nodes[10].position.y = l_foot_y; // L_Foot
+            nodes[13].position = nodes[12].position - Vec3::Y * 0.2 + forward * 0.08;
+            nodes[13].position.y = r_foot_y; // R_Foot
         } else {
             // STANDING / UPRIGHT WALKING ALIGNMENT
             let sh_w = settings.shoulder_width;
@@ -3246,18 +3912,23 @@ fn player_movement_and_ragdoll_system(
                 let is_pistol = p_active_weapon == ActiveWeapon::Pistol
                     || p_active_weapon == ActiveWeapon::Revolver;
 
+                let cam_forward = cam_transform.forward().as_vec3();
+                let pitch_offset = Vec3::Y * (cam_forward.y * 0.35);
                 let (l_hand_pos, r_hand_pos) = if is_rifle {
-                    // Rifle two-handed hold
-                    let r_pos = nodes[2].position + forward * 0.45 + right * 0.12 * p_weight
-                        - Vec3::Y * 0.15 * p_height;
-                    let l_pos = nodes[2].position + forward * 0.65 + right * 0.02 * p_weight
-                        - Vec3::Y * 0.1 * p_height;
+                    // Rifle & Sniper two-handed hold: Raised up near chest/shoulder height
+                    let r_pos = nodes[2].position + forward * 0.38 + right * 0.04 * p_weight
+                        - Vec3::Y * 0.02 * p_height
+                        + pitch_offset;
+                    let l_pos = nodes[2].position + forward * 0.58 - right * 0.02 * p_weight
+                        + Vec3::Y * 0.01 * p_height
+                        + pitch_offset;
                     (l_pos, r_pos)
                 } else if is_pistol {
-                    // Pistol two-handed hold
-                    let r_pos = nodes[2].position + forward * 0.45 + right * 0.05 * p_weight
-                        - Vec3::Y * 0.15 * p_height;
-                    let l_pos = r_pos - right * 0.06 * p_weight - forward * 0.03 + Vec3::Y * 0.02;
+                    // Pistol two-handed hold: Both hands together in front of chest
+                    let r_pos = nodes[2].position + forward * 0.40 + right * 0.02 * p_weight
+                        - Vec3::Y * 0.12 * p_height
+                        + pitch_offset;
+                    let l_pos = r_pos - right * 0.03 * p_weight - forward * 0.02 + Vec3::Y * 0.01;
                     (l_pos, r_pos)
                 } else {
                     // Melee / Default behavior
@@ -3912,8 +4583,13 @@ fn play_visual_sync_system(
 
         if let Some(node) = player.nodes.iter().find(|n| n.name == visual.name) {
             transform.translation = node.position;
-            // Orient all joint nodes to face the player's body movement direction
-            transform.rotation = Quat::from_rotation_y(-player.rotation_yaw);
+            // Orient joint nodes to face the player's body movement direction
+            if visual.name == "Head" || visual.name == "Chest" {
+                transform.rotation =
+                    Quat::from_rotation_y(std::f32::consts::FRAC_PI_2 - player.rotation_yaw);
+            } else {
+                transform.rotation = Quat::from_rotation_y(-player.rotation_yaw);
+            }
 
             // Hide the head in first person to prevent clipping/view blockage
             if visual.name == "Head" && is_first_person {
@@ -3978,6 +4654,7 @@ fn play_mode_hud_ui(
     )>,
     starship_query: Query<(&Transform, &CrashedStarship)>,
     mut building_state: ResMut<structures::BuildingPlacementState>,
+    mut char_settings: ResMut<CharacterSettings>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
@@ -3985,6 +4662,13 @@ fn play_mode_hud_ui(
     let Ok(mut player) = player_query.single_mut() else {
         return;
     };
+
+    if keyboard.just_pressed(KeyCode::F5) {
+        let _ = save_progress(&inventory, &player, &char_settings);
+    }
+    if keyboard.just_pressed(KeyCode::F9) {
+        let _ = load_progress(&mut inventory, &mut player, &mut char_settings);
+    }
 
     // 1. Play Mode Inventory & Controls Panel
     egui::Window::new("🎮 Play Mode HUD & Inventory")
@@ -4062,11 +4746,40 @@ fn play_mode_hud_ui(
                     ui.label("🤖 Robot Parts:"); ui.label(egui::RichText::new(inventory.robot_parts.to_string()).strong().color(egui::Color32::from_rgb(140, 150, 170))); ui.end_row();
                 });
 
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new("💾 Save (F5)")
+                                .strong()
+                                .color(egui::Color32::BLACK),
+                        )
+                        .fill(egui::Color32::from_rgb(100, 240, 150)),
+                    )
+                    .clicked()
+                {
+                    let _ = save_progress(&inventory, &player, &char_settings);
+                }
+                if ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new("📂 Load (F9)")
+                                .strong()
+                                .color(egui::Color32::BLACK),
+                        )
+                        .fill(egui::Color32::from_rgb(100, 200, 255)),
+                    )
+                    .clicked()
+                {
+                    let _ = load_progress(&mut inventory, &mut player, &mut char_settings);
+                }
+            });
             ui.add_space(10.0);
             ui.separator();
 
             ui.label(egui::RichText::new("Controls:").strong().underline());
-            ui.label("• W, A, S, D to move / strafe\n• Shift to Run / Turbo Swim Sprint\n• Space to Jump, Swim Up, or Climb Bridge Deck\n• Ctrl or C to Dive Down (Water) or Crouch\n• Mouse to look and aim\n• Left-Click to shoot / swing melee\n• Press 1..=5 to switch weapon slot\n• Press [R] to reload current gun\n• Press [H] to toggle Tactical Headlamp ON/OFF\n• Press [Q] to use Health Pack (+35 HP)\n• Press [X] to dismantle Trilobite defender\n• Press [B] to activate Surface Recall Beacon\n• Press [G] to collapse into ragdoll!");
+            ui.label("• W, A, S, D to move / strafe\n• Shift to Run / Turbo Swim Sprint\n• Space to Jump, Swim Up, or Climb Bridge Deck\n• Ctrl or C to Dive Down (Water) or Crouch\n• Mouse to look and aim\n• Left-Click to shoot / swing melee\n• Press 1..=5 to switch weapon slot\n• Press [R] to reload current gun\n• Press [F5] to Quick Save / [F9] to Quick Load\n• Press [H] to toggle Tactical Headlamp ON/OFF\n• Press [Q] to use Health Pack (+35 HP)\n• Press [X] to dismantle Trilobite defender\n• Press [B] to activate Surface Recall Beacon\n• Press [G] to collapse into ragdoll!");
 
             ui.add_space(15.0);
             if ui.add(egui::Button::new("🚪 Exit to Launcher Menu").fill(egui::Color32::from_rgb(160, 40, 40))).clicked() {
@@ -5528,11 +6241,20 @@ fn play_mode_hud_ui(
                 }
 
                 ui.separator();
-                ui.label(
-                    egui::RichText::new("🎯 Left-Click in world to construct structure\n⌨ Press [B] to Exit Building Mode")
-                        .strong()
-                        .color(egui::Color32::from_rgb(100, 220, 255)),
-                );
+                let is_brick_wall = building_state.selected_structure == structures::StructureType::ClassicBrickWall;
+                if is_brick_wall {
+                    ui.label(
+                        egui::RichText::new("🧱 Multi-Point Wall Builder:\n• Left-Click ground to place points 1, 2, 3...\n• Arrow Up / Down to adjust Wall Height\n• Press [ENTER] to construct complete wall\n• Press [B] to Exit Building Mode")
+                            .strong()
+                            .color(egui::Color32::from_rgb(100, 255, 180)),
+                    );
+                } else {
+                    ui.label(
+                        egui::RichText::new("🎯 Left-Click in world to place structure\n🔄 Press [R] / [Q] / [E] to ROTATE structure 360°\n⌨ Press [B] to Exit Building Mode")
+                            .strong()
+                            .color(egui::Color32::from_rgb(100, 220, 255)),
+                    );
+                }
             });
     }
 }
@@ -5655,7 +6377,7 @@ fn play_weapon_sync_system(
                     commands.entity(handle).add_child(blade);
                     handle
                 } else {
-                    let handle_mesh = meshes.add(Cuboid::new(0.04, 1.0, 0.04));
+                    let handle_mesh = meshes.add(Cuboid::new(0.04, 0.8, 0.04));
                     let handle_mat = materials.add(StandardMaterial {
                         base_color: Color::srgb(0.42, 0.25, 0.15),
                         perceptual_roughness: 0.9,
@@ -5665,9 +6387,8 @@ fn play_weapon_sync_system(
                         .spawn((
                             Mesh3d(handle_mesh),
                             MeshMaterial3d(handle_mat),
-                            Transform::from_xyz(0.0, -0.22, 0.18).with_rotation(
-                                Quat::from_rotation_x(std::f32::consts::FRAC_PI_2 - 0.1),
-                            ),
+                            Transform::from_xyz(0.0, 0.30, 0.0)
+                                .with_rotation(Quat::from_rotation_x(-0.25)),
                             PlayWeaponVisual {
                                 weapon_type: ActiveWeapon::Melee,
                                 is_sword: false,
@@ -5695,30 +6416,91 @@ fn play_weapon_sync_system(
                             LinearRgba::new(1.0, 3.0, 4.0, 1.0),
                         ),
                     };
-                    let blade_mesh = meshes.add(Cuboid::new(0.06, 0.28, 0.25));
-                    let blade_mat = materials.add(StandardMaterial {
-                        base_color: axe_color,
-                        metallic: metallic_val,
+
+                    // 1. Central Metallic Socket Collar
+                    let socket_mesh = meshes.add(Cuboid::new(0.07, 0.12, 0.07));
+                    let socket_mat = materials.add(StandardMaterial {
+                        base_color: Color::srgb(0.2, 0.22, 0.25),
+                        metallic: 0.95,
                         perceptual_roughness: 0.2,
-                        emissive: emissive_val,
                         ..default()
                     });
-                    let blade = commands
+                    let socket = commands
                         .spawn((
-                            Mesh3d(blade_mesh),
-                            MeshMaterial3d(blade_mat),
-                            Transform::from_xyz(0.0, 0.48, 0.08),
+                            Mesh3d(socket_mesh),
+                            MeshMaterial3d(socket_mat),
+                            Transform::from_xyz(0.0, 0.35, 0.0),
                             PlayModeEntity,
                         ))
                         .id();
-                    commands.entity(handle).add_child(blade);
+                    commands.entity(handle).add_child(socket);
+
+                    // 2. Double-Sided Battleaxe Blades & Sharp Beveled Edges
+                    let blade_mat = materials.add(StandardMaterial {
+                        base_color: axe_color,
+                        metallic: metallic_val,
+                        perceptual_roughness: 0.15,
+                        emissive: emissive_val,
+                        ..default()
+                    });
+                    let edge_mat = materials.add(StandardMaterial {
+                        base_color: Color::srgb(0.9, 0.95, 1.0),
+                        metallic: 1.0,
+                        perceptual_roughness: 0.05,
+                        emissive: LinearRgba::new(0.5, 0.8, 1.0, 1.0),
+                        ..default()
+                    });
+
+                    let crescent_mesh = meshes.add(Cuboid::new(0.18, 0.26, 0.03));
+                    let edge_mesh = meshes.add(Cuboid::new(0.06, 0.28, 0.015));
+
+                    // Left Blade & Sharp Edge
+                    let left_blade = commands
+                        .spawn((
+                            Mesh3d(crescent_mesh.clone()),
+                            MeshMaterial3d(blade_mat.clone()),
+                            Transform::from_xyz(0.11, 0.35, 0.0),
+                            PlayModeEntity,
+                        ))
+                        .id();
+                    let left_edge = commands
+                        .spawn((
+                            Mesh3d(edge_mesh.clone()),
+                            MeshMaterial3d(edge_mat.clone()),
+                            Transform::from_xyz(0.21, 0.35, 0.0),
+                            PlayModeEntity,
+                        ))
+                        .id();
+                    commands.entity(handle).add_child(left_blade);
+                    commands.entity(handle).add_child(left_edge);
+
+                    // Right Symmetrical Blade & Sharp Edge (Double-Sided Battleaxe)
+                    let right_blade = commands
+                        .spawn((
+                            Mesh3d(crescent_mesh),
+                            MeshMaterial3d(blade_mat),
+                            Transform::from_xyz(-0.11, 0.35, 0.0),
+                            PlayModeEntity,
+                        ))
+                        .id();
+                    let right_edge = commands
+                        .spawn((
+                            Mesh3d(edge_mesh),
+                            MeshMaterial3d(edge_mat),
+                            Transform::from_xyz(-0.21, 0.35, 0.0),
+                            PlayModeEntity,
+                        ))
+                        .id();
+                    commands.entity(handle).add_child(right_blade);
+                    commands.entity(handle).add_child(right_edge);
+
                     handle
                 }
             }
             ActiveWeapon::Pistol => commands
                 .spawn((
                     WorldAssetRoot(asset_server.load("Gun_Pistol.gltf#Scene0")),
-                    Transform::from_xyz(0.0, -0.05, 0.18)
+                    Transform::from_xyz(0.0, -0.04, 0.05)
                         .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
                     PlayWeaponVisual {
                         weapon_type: ActiveWeapon::Pistol,
@@ -5732,7 +6514,7 @@ fn play_weapon_sync_system(
             ActiveWeapon::Revolver => commands
                 .spawn((
                     WorldAssetRoot(asset_server.load("Gun_Revolver.gltf#Scene0")),
-                    Transform::from_xyz(0.0, -0.05, 0.18)
+                    Transform::from_xyz(0.0, -0.04, 0.05)
                         .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
                     PlayWeaponVisual {
                         weapon_type: ActiveWeapon::Revolver,
@@ -5746,7 +6528,7 @@ fn play_weapon_sync_system(
             ActiveWeapon::Rifle => commands
                 .spawn((
                     WorldAssetRoot(asset_server.load("Gun_Rifle.gltf#Scene0")),
-                    Transform::from_xyz(0.0, -0.08, 0.22)
+                    Transform::from_xyz(-0.02, -0.05, 0.08)
                         .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
                     PlayWeaponVisual {
                         weapon_type: ActiveWeapon::Rifle,
@@ -5760,7 +6542,7 @@ fn play_weapon_sync_system(
             ActiveWeapon::Sniper => commands
                 .spawn((
                     WorldAssetRoot(asset_server.load("Gun_Sniper.gltf#Scene0")),
-                    Transform::from_xyz(0.0, -0.1, 0.25)
+                    Transform::from_xyz(-0.02, -0.06, 0.10)
                         .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
                     PlayWeaponVisual {
                         weapon_type: ActiveWeapon::Sniper,
@@ -6144,36 +6926,36 @@ fn weapon_attachment_system(
             }
         } else {
             // If it's not already on the hand, move it to the hand
-            if parent.parent() != hand_entity {
+            let need_reparent = parent.parent() != hand_entity;
+            if need_reparent {
                 commands.entity(hand_entity).add_child(weapon_entity);
-                // Restore default hand transforms
-                let (offset, rot) = match visual.weapon_type {
-                    ActiveWeapon::Melee => {
-                        if visual.is_sword {
-                            (
-                                Vec3::new(0.0, -0.15, 0.15),
-                                Quat::from_rotation_x(std::f32::consts::FRAC_PI_2 - 0.1),
-                            )
-                        } else {
-                            (
-                                Vec3::new(0.0, -0.22, 0.18),
-                                Quat::from_rotation_x(std::f32::consts::FRAC_PI_2 - 0.1),
-                            )
-                        }
+            }
+            // Restore default hand transforms
+            let (offset, rot) = match visual.weapon_type {
+                ActiveWeapon::Melee => {
+                    if visual.is_sword {
+                        (
+                            Vec3::new(0.0, -0.05, 0.05),
+                            Quat::from_rotation_x(std::f32::consts::FRAC_PI_2 - 0.1),
+                        )
+                    } else {
+                        (Vec3::new(0.0, 0.30, 0.0), Quat::from_rotation_x(-0.25))
                     }
-                    ActiveWeapon::Pistol | ActiveWeapon::Revolver => (
-                        Vec3::new(0.0, -0.05, 0.18),
-                        Quat::from_rotation_y(std::f32::consts::PI),
-                    ),
-                    ActiveWeapon::Rifle => (
-                        Vec3::new(0.0, -0.08, 0.22),
-                        Quat::from_rotation_y(std::f32::consts::PI),
-                    ),
-                    ActiveWeapon::Sniper => (
-                        Vec3::new(0.0, -0.1, 0.25),
-                        Quat::from_rotation_y(std::f32::consts::PI),
-                    ),
-                };
+                }
+                ActiveWeapon::Pistol | ActiveWeapon::Revolver => (
+                    Vec3::new(0.0, -0.04, 0.05),
+                    Quat::from_rotation_y(std::f32::consts::PI),
+                ),
+                ActiveWeapon::Rifle => (
+                    Vec3::new(-0.02, -0.05, 0.08),
+                    Quat::from_rotation_y(std::f32::consts::PI),
+                ),
+                ActiveWeapon::Sniper => (
+                    Vec3::new(-0.02, -0.06, 0.10),
+                    Quat::from_rotation_y(std::f32::consts::PI),
+                ),
+            };
+            if need_reparent {
                 commands
                     .entity(weapon_entity)
                     .insert(Transform::from_translation(offset).with_rotation(rot));
@@ -6616,7 +7398,153 @@ fn generate_cloud_texture(perlin: &crate::map_editor::noise::PerlinNoise) -> Ima
     )
 }
 
-#[allow(clippy::type_complexity)]
+pub fn get_black_hole_gravity_boost(elapsed: f32) -> f32 {
+    let day_speed = 0.0168;
+    let master_phase = elapsed * day_speed;
+    let bh_phase = master_phase + std::f32::consts::PI;
+    let bh_y = bh_phase.sin() * 2800.0;
+    if bh_y > 0.0 {
+        (bh_y / 2800.0).clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
+fn create_accretion_disk_mesh(inner_radius: f32, outer_radius: f32, segments: usize) -> Mesh {
+    let mut positions = Vec::new();
+    let mut normals = Vec::new();
+    let mut uvs = Vec::new();
+    let mut indices = Vec::new();
+
+    for i in 0..=segments {
+        let t = i as f32 / segments as f32;
+        let angle = t * std::f32::consts::TAU;
+        let cos = angle.cos();
+        let sin = angle.sin();
+
+        // Inner vertex
+        let ix = inner_radius * cos;
+        let iz = inner_radius * sin;
+        positions.push([ix, 0.0, iz]);
+        normals.push([0.0, 1.0, 0.0]);
+        // Map to the square texture (Cartesian)
+        uvs.push([
+            (ix / outer_radius) * 0.5 + 0.5,
+            (iz / outer_radius) * 0.5 + 0.5,
+        ]);
+
+        // Outer vertex
+        let ox = outer_radius * cos;
+        let oz = outer_radius * sin;
+        positions.push([ox, 0.0, oz]);
+        normals.push([0.0, 1.0, 0.0]);
+        uvs.push([
+            (ox / outer_radius) * 0.5 + 0.5,
+            (oz / outer_radius) * 0.5 + 0.5,
+        ]);
+    }
+
+    for i in 0..segments {
+        let i0 = (i * 2) as u32;
+        let i1 = i0 + 1;
+        let i2 = i0 + 2;
+        let i3 = i0 + 3;
+
+        indices.extend_from_slice(&[i0, i1, i2]);
+        indices.extend_from_slice(&[i1, i3, i2]);
+    }
+
+    let mut mesh = Mesh::new(
+        bevy::render::render_resource::PrimitiveTopology::TriangleList,
+        bevy::asset::RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(bevy::mesh::Indices::U32(indices));
+    mesh
+}
+
+fn generate_accretion_disk_texture(perlin: &crate::map_editor::noise::PerlinNoise) -> Image {
+    let size = 256;
+    let mut data = vec![0u8; size * size * 4];
+    let center = size as f32 / 2.0;
+
+    for y in 0..size {
+        for x in 0..size {
+            let idx = (y * size + x) * 4;
+            let dx = x as f32 - center;
+            let dy = y as f32 - center;
+            let radius = (dx * dx + dy * dy).sqrt() / center;
+            let angle = dy.atan2(dx);
+
+            // Only draw the ring
+            if !(0.18..=0.95).contains(&radius) {
+                data[idx] = 0;
+                data[idx + 1] = 0;
+                data[idx + 2] = 0;
+                data[idx + 3] = 0;
+                continue;
+            }
+
+            // Smooth radial falloff (soft edges)
+            let inner = ((radius - 0.18) / 0.10).clamp(0.0, 1.0);
+            let outer = ((0.95 - radius) / 0.12).clamp(0.0, 1.0);
+            let radial_falloff = (inner * outer).powf(0.7);
+
+            // Mild spiral arms (much less aggressive so it stays full)
+            let spiral = angle * 2.5 + (1.0 / (radius + 0.08)) * 1.8;
+            let noise1 = perlin.noise(spiral.cos() * 3.0, spiral.sin() * 3.0);
+            let noise2 = perlin.noise(radius * 9.0, angle * 2.0);
+            let noise_val = (noise1 * 0.55 + noise2 * 0.45) * 0.5 + 0.5;
+
+            // Concentric energy bands
+            let ring_band = ((radius * 22.0).sin() * 0.5 + 0.5).powf(1.3);
+
+            // Final intensity – keeps the ring more uniform
+            let intensity =
+                (radial_falloff * (0.45 + noise_val * 0.35 + ring_band * 0.25)).clamp(0.0, 1.0);
+
+            // Color gradient: hot white-yellow core → orange → deep red
+            let (r, g, b) = if intensity > 0.72 {
+                (255, 240, 190)
+            } else if intensity > 0.40 {
+                (
+                    255,
+                    (120.0 + intensity * 110.0) as u8,
+                    (20.0 + intensity * 40.0) as u8,
+                )
+            } else {
+                (
+                    (intensity * 380.0).min(255.0) as u8,
+                    (intensity * 90.0) as u8,
+                    8,
+                )
+            };
+
+            let alpha = (intensity * 255.0) as u8;
+
+            data[idx] = r;
+            data[idx + 1] = g;
+            data[idx + 2] = b;
+            data[idx + 3] = alpha;
+        }
+    }
+
+    Image::new(
+        bevy::render::render_resource::Extent3d {
+            width: size as u32,
+            height: size as u32,
+            depth_or_array_layers: 1,
+        },
+        bevy::render::render_resource::TextureDimension::D2,
+        data,
+        bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+        bevy::asset::RenderAssetUsages::default(),
+    )
+}
+
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn play_sky_cycle_system(
     time: Res<Time>,
     player_query: Query<&Transform, With<PlayModePlayer>>,
@@ -6627,7 +7555,13 @@ fn play_sky_cycle_system(
             &mut Visibility,
             Option<&mut DirectionalLight>,
         ),
-        Without<PlayModePlayer>,
+        (
+            Without<PlayModePlayer>,
+            Without<PlayNightPlanet>,
+            Without<PlayPlanetRings>,
+            Without<PlayBlackHoleMoon>,
+            Without<PlayBlackHoleDiskHoriz>,
+        ),
     >,
     mut cloud_query: Query<
         &mut Visibility,
@@ -6635,10 +7569,35 @@ fn play_sky_cycle_system(
             With<PlayModeCloud>,
             Without<PlaySun>,
             Without<PlayModePlayer>,
+            Without<PlayNightPlanet>,
+            Without<PlayPlanetRings>,
+            Without<PlayBlackHoleMoon>,
+            Without<PlayBlackHoleDiskHoriz>,
         ),
     >,
     mut clear_color: ResMut<ClearColor>,
     mut camera_query: Query<&mut DistanceFog, With<PlayModeCamera>>,
+    mut night_sky_query: Query<
+        (
+            &mut Transform,
+            &mut Visibility,
+            Option<&PlayNightPlanet>,
+            Option<&PlayPlanetRings>,
+            Option<&PlayBlackHoleMoon>,
+            Option<&PlayBlackHoleDiskHoriz>,
+        ),
+        (
+            Or<(
+                With<PlayNightPlanet>,
+                With<PlayPlanetRings>,
+                With<PlayBlackHoleMoon>,
+                With<PlayBlackHoleDiskHoriz>,
+            )>,
+            Without<PlayModePlayer>,
+            Without<PlaySun>,
+            Without<PlayModeCloud>,
+        ),
+    >,
 ) {
     let elapsed = time.elapsed_secs();
     let player_center = player_query
@@ -6674,15 +7633,79 @@ fn play_sky_cycle_system(
         }
 
         if let Some(mut light) = opt_light {
-            transform.look_at(player_center, Vec3::Y);
-
-            let t = (y / radius).clamp(-0.2, 0.2) * 2.5 + 0.5; // smooth twilight/day fade
-            let intensity = if is_underground {
-                0.0
+            let target_dir = (player_center - transform.translation).normalize_or_zero();
+            let up = if target_dir.y.abs() > 0.99 {
+                Vec3::Z
             } else {
-                t.clamp(0.0, 1.0) * sun.day_intensity
+                Vec3::Y
             };
-            light.illuminance = intensity;
+            transform.look_at(player_center, up);
+
+            let day_factor = (y / 200.0).clamp(0.0, 1.0); // smooth 0.0 to 1.0 day transition
+            if is_underground || day_factor <= 0.001 {
+                light.illuminance = 0.0;
+                light.shadow_maps_enabled = false;
+            } else {
+                light.illuminance = day_factor * sun.day_intensity;
+                light.shadow_maps_enabled = true;
+            }
+        }
+    }
+
+    // Black Hole centered in the night sky (opposite to Sun, i.e. phase offset is PI)
+    let bh_phase = master_phase * 1.0 + std::f32::consts::PI;
+    let bh_orbit_radius = 2800.0;
+    let bh_x = bh_phase.cos() * bh_orbit_radius;
+    let bh_y = bh_phase.sin() * bh_orbit_radius;
+    let bh_z = (bh_phase * 0.5).cos() * bh_orbit_radius * 0.3;
+    let bh_center = player_center + Vec3::new(bh_x, bh_y, bh_z);
+
+    // Gas Giant Planet orbits the Black Hole!
+    let planet_orbit_phase = elapsed * 0.20; // slow orbit around black hole
+    let planet_orbit_radius = 520.0; // wide orbit to prevent overlap and show transit/lensing
+    let pox = planet_orbit_phase.cos() * planet_orbit_radius;
+    let poy = planet_orbit_phase.sin() * planet_orbit_radius;
+    let poz = (planet_orbit_phase * 0.7).cos() * planet_orbit_radius * 0.45;
+    let planet_pos = bh_center + Vec3::new(pox, poy, poz);
+
+    // Compute gravitational lensing alignment (magnification/shear when passing behind black hole)
+    let dir_bh = (bh_center - player_center).normalize_or_zero();
+    let dir_planet = (planet_pos - player_center).normalize_or_zero();
+    let alignment = dir_bh.dot(dir_planet);
+    let lens_factor = if alignment > 0.88 {
+        1.0 + ((alignment - 0.88) / 0.12).clamp(0.0, 1.0) * 0.45
+    } else {
+        1.0
+    };
+
+    // Update Planet, Rings, Black Hole Moon, Accretion Disk
+    for (mut transform, mut visibility, opt_planet, opt_rings, opt_bh, opt_disk_horiz) in
+        night_sky_query.iter_mut()
+    {
+        if is_underground || bh_y < -300.0 {
+            *visibility = Visibility::Hidden;
+        } else {
+            *visibility = Visibility::Inherited;
+        }
+
+        if opt_planet.is_some() {
+            transform.translation = planet_pos;
+            transform.rotation = Quat::from_rotation_x(0.2) * Quat::from_rotation_y(elapsed * 0.15);
+            transform.scale = Vec3::splat(lens_factor);
+        } else if opt_rings.is_some() {
+            transform.translation = planet_pos;
+            transform.rotation =
+                Quat::from_rotation_x(0.45) * Quat::from_rotation_y(elapsed * 0.08);
+            transform.scale = Vec3::splat(lens_factor);
+        } else if opt_bh.is_some() {
+            transform.translation = bh_center;
+            transform.scale = Vec3::ONE;
+        } else if opt_disk_horiz.is_some() {
+            let dir_to_player = (player_center - bh_center).normalize_or_zero();
+            transform.translation = bh_center + dir_to_player * 25.0;
+            transform.rotation =
+                Quat::from_rotation_x(0.35) * Quat::from_rotation_y(-elapsed * 0.15);
+            transform.scale = Vec3::ONE;
         }
     }
 
@@ -7047,13 +8070,6 @@ fn gun_fire_and_bullet_system(
                 Vec3::new(new_pos.x, water_level, new_pos.z),
                 Color::srgb(0.4, 0.6, 0.95),
             );
-            commands.spawn((
-                AudioPlayer::new(asset_server.load("water_splash.ogg")),
-                PlaybackSettings {
-                    volume: bevy::audio::Volume::Linear(0.6),
-                    ..PlaybackSettings::DESPAWN
-                },
-            ));
             commands.entity(bullet_entity).despawn();
             continue;
         }
@@ -7730,6 +8746,7 @@ fn building_placement_system(
     player_query: Query<(&Transform, &PlayModePlayer)>,
     camera_query: Query<&Transform, With<PlayModeCamera>>,
     ghost_query: Query<Entity, With<structures::PlacementPreviewGhost>>,
+    mut wall_builder: ResMut<crate::procedural_walls::ProceduralWallBuilder>,
 ) {
     if keyboard_input.just_pressed(KeyCode::KeyB) {
         building_state.is_active = !building_state.is_active;
@@ -7737,6 +8754,8 @@ fn building_placement_system(
             inventory_log("🏗️ Building Mode Activated! Press [1..=9] to select structure.");
         } else {
             inventory_log("🏗️ Building Mode Deactivated.");
+            wall_builder.active = false;
+            wall_builder.points.clear();
             for ghost in ghost_query.iter() {
                 commands.entity(ghost).despawn();
             }
@@ -7744,40 +8763,105 @@ fn building_placement_system(
     }
 
     if !building_state.is_active {
+        wall_builder.active = false;
         for ghost in ghost_query.iter() {
             commands.entity(ghost).despawn();
         }
         return;
     }
 
+    let prev_structure = building_state.selected_structure;
+
     // Number keys 1..=9 select structure
     if keyboard_input.just_pressed(KeyCode::Digit1) {
         building_state.selected_structure = structures::StructureType::ClassicBrickWall;
-        inventory_log("🏗️ Selected: 🧱 Classic Brick Wall");
+        inventory_log(
+            "🏗️ Selected: 🧱 Multi-Point Procedural Brick Wall [Click points, Enter to build]",
+        );
     } else if keyboard_input.just_pressed(KeyCode::Digit2) {
         building_state.selected_structure = structures::StructureType::Watchtower;
-        inventory_log("🏗️ Selected: 🗼 Fortified Watchtower");
+        inventory_log("🏗️ Selected: 🗼 Fortified Watchtower [R / Q / E to rotate]");
     } else if keyboard_input.just_pressed(KeyCode::Digit3) {
         building_state.selected_structure = structures::StructureType::Staircase;
-        inventory_log("🏗️ Selected: 🪜 Modular Staircase");
+        inventory_log("🏗️ Selected: 🪜 Modular Staircase [R / Q / E to rotate]");
     } else if keyboard_input.just_pressed(KeyCode::Digit4) {
         building_state.selected_structure = structures::StructureType::Ramp;
-        inventory_log("🏗️ Selected: 📐 Inclined Ramp");
+        inventory_log("🏗️ Selected: 📐 Inclined Ramp [R / Q / E to rotate]");
     } else if keyboard_input.just_pressed(KeyCode::Digit5) {
         building_state.selected_structure = structures::StructureType::WoodenBridge;
-        inventory_log("🏗️ Selected: 🌉 Wooden Plank Bridge");
+        inventory_log("🏗️ Selected: 🌉 Wooden Plank Bridge [R / Q / E to rotate]");
     } else if keyboard_input.just_pressed(KeyCode::Digit6) {
         building_state.selected_structure = structures::StructureType::PalisadeFence;
-        inventory_log("🏗️ Selected: 🪵 Palisade Stake Fence");
+        inventory_log(
+            "🏗️ Selected: 🪵 Multi-Point Palisade Stake Fence [Click points, Enter to build]",
+        );
     } else if keyboard_input.just_pressed(KeyCode::Digit7) {
         building_state.selected_structure = structures::StructureType::GraniteFortressWall;
-        inventory_log("🏗️ Selected: 🧱 Granite Fortress Wall");
+        inventory_log(
+            "🏗️ Selected: 🧱 Multi-Point Granite Fortress Wall [Click points, Enter to build]",
+        );
     } else if keyboard_input.just_pressed(KeyCode::Digit8) {
         building_state.selected_structure = structures::StructureType::LogTimberWall;
-        inventory_log("🏗️ Selected: 🪵 Log Cabin Wall");
+        inventory_log("🏗️ Selected: 🪵 Multi-Point Log Cabin Wall [Click points, Enter to build]");
     } else if keyboard_input.just_pressed(KeyCode::Digit9) {
         building_state.selected_structure = structures::StructureType::CyberMetalWall;
-        inventory_log("🏗️ Selected: ⚡ Cyber Metal Wall");
+        inventory_log(
+            "🏗️ Selected: ⚡ Multi-Point Cyber Metal Wall [Click points, Enter to build]",
+        );
+    }
+
+    // 1. Rotation Key Controls: R, Q, E, Left / Right Arrows
+    let shift_held =
+        keyboard_input.pressed(KeyCode::ShiftLeft) || keyboard_input.pressed(KeyCode::ShiftRight);
+    let mut rotation_changed = false;
+    if keyboard_input.just_pressed(KeyCode::KeyR) {
+        if shift_held {
+            building_state.rotation_yaw -= std::f32::consts::FRAC_PI_4;
+        } else {
+            building_state.rotation_yaw += std::f32::consts::FRAC_PI_4;
+        }
+        rotation_changed = true;
+    } else if keyboard_input.just_pressed(KeyCode::KeyQ) {
+        building_state.rotation_yaw -= std::f32::consts::FRAC_PI_4;
+        rotation_changed = true;
+    } else if keyboard_input.just_pressed(KeyCode::KeyE) {
+        building_state.rotation_yaw += std::f32::consts::FRAC_PI_4;
+        rotation_changed = true;
+    }
+
+    // 2. Handle Multi-Point Procedural Wall Builder Mode for all 5 Wall Styles
+    let procedural_style = match building_state.selected_structure {
+        structures::StructureType::ClassicBrickWall => {
+            Some(crate::procedural_walls::WallStyle::ClassicBrick)
+        }
+        structures::StructureType::PalisadeFence => {
+            Some(crate::procedural_walls::WallStyle::PalisadeFence)
+        }
+        structures::StructureType::GraniteFortressWall => {
+            Some(crate::procedural_walls::WallStyle::GraniteFortress)
+        }
+        structures::StructureType::LogTimberWall => {
+            Some(crate::procedural_walls::WallStyle::LogTimber)
+        }
+        structures::StructureType::CyberMetalWall => {
+            Some(crate::procedural_walls::WallStyle::CyberMetal)
+        }
+        _ => None,
+    };
+
+    if let Some(style) = procedural_style {
+        wall_builder.active = true;
+        if wall_builder.style != style {
+            wall_builder.style = style;
+            wall_builder.points.clear();
+        }
+        for ghost in ghost_query.iter() {
+            commands.entity(ghost).despawn();
+        }
+        return;
+    } else {
+        wall_builder.active = false;
+        wall_builder.points.clear();
     }
 
     let Ok((_player_transform, player)) = player_query.single() else {
@@ -7791,23 +8875,24 @@ fn building_placement_system(
         Vec3::new(cam_transform.forward().x, 0.0, cam_transform.forward().z).normalize_or_zero();
     let place_dist = 4.0;
     let place_pos = player.position + cam_forward * place_dist;
-    let place_rot = Quat::from_rotation_y(-player.rotation_yaw);
+    let place_rot = Quat::from_rotation_y(-player.rotation_yaw + building_state.rotation_yaw);
 
-    // Update or spawn ghost preview box
-    if ghost_query.is_empty() {
-        let ghost_mat = materials.add(StandardMaterial {
-            base_color: Color::srgba(0.2, 0.6, 1.0, 0.45),
-            alpha_mode: AlphaMode::Blend,
-            unlit: true,
-            ..default()
-        });
-        commands.spawn((
-            Mesh3d(meshes.add(Cuboid::new(2.5, 2.5, 2.5))),
-            MeshMaterial3d(ghost_mat),
-            Transform::from_translation(place_pos).with_rotation(place_rot),
-            structures::PlacementPreviewGhost,
-            PlayModeEntity,
-        ));
+    // Re-spawn or update ghost preview model when selection or rotation changes
+    if ghost_query.is_empty()
+        || prev_structure != building_state.selected_structure
+        || rotation_changed
+    {
+        for ghost in ghost_query.iter() {
+            commands.entity(ghost).despawn();
+        }
+        structures::spawn_preview_ghost_model(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            building_state.selected_structure,
+            place_pos,
+            place_rot,
+        );
     } else {
         for ghost in ghost_query.iter() {
             commands
@@ -7816,7 +8901,7 @@ fn building_placement_system(
         }
     }
 
-    // Place structure on Left-Click
+    // Place modular structure on Left-Click
     if mouse_button.just_pressed(MouseButton::Left) {
         structures::spawn_procedural_structure(
             &mut commands,

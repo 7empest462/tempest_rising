@@ -48,6 +48,7 @@ impl StructureType {
 pub struct BuildingPlacementState {
     pub is_active: bool,
     pub selected_structure: StructureType,
+    pub rotation_yaw: f32,
 }
 
 impl Default for BuildingPlacementState {
@@ -55,6 +56,7 @@ impl Default for BuildingPlacementState {
         Self {
             is_active: false,
             selected_structure: StructureType::ClassicBrickWall,
+            rotation_yaw: 0.0,
         }
     }
 }
@@ -63,9 +65,220 @@ impl Default for BuildingPlacementState {
 #[derive(Component)]
 pub struct PlacedStructure;
 
-/// Tag component for the ghost placement preview box
+/// Tag component for the ghost placement preview model
 #[derive(Component)]
 pub struct PlacementPreviewGhost;
+
+/// Tag component for climbable watchtower ladders
+#[derive(Component)]
+pub struct WatchtowerLadder;
+
+/// Spawns an exact 3D translucent preview model of the selected structure for real-time placement & rotation
+pub fn spawn_preview_ghost_model(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    structure_type: StructureType,
+    pos: Vec3,
+    rot: Quat,
+) -> Entity {
+    let ghost_mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.2, 0.7, 1.0, 0.45),
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        ..default()
+    });
+
+    let parent_entity = commands
+        .spawn((
+            Transform::from_translation(pos).with_rotation(rot),
+            Visibility::Visible,
+            InheritedVisibility::default(),
+            PlacementPreviewGhost,
+            crate::play_mode::PlayModeEntity,
+        ))
+        .id();
+
+    match structure_type {
+        StructureType::ClassicBrickWall => {
+            let mesh = meshes.add(Cuboid::new(2.4, 2.5, 0.35));
+            let child = commands
+                .spawn((
+                    Mesh3d(mesh),
+                    MeshMaterial3d(ghost_mat),
+                    Transform::from_xyz(0.0, 1.25, 0.0),
+                ))
+                .id();
+            commands.entity(parent_entity).add_child(child);
+        }
+        StructureType::Watchtower => {
+            // Posts (5.7m tall)
+            let post_mesh = meshes.add(Cuboid::new(0.25, 5.7, 0.25));
+            for x in [-1.4, 1.4] {
+                for z in [-1.4, 1.4] {
+                    let child = commands
+                        .spawn((
+                            Mesh3d(post_mesh.clone()),
+                            MeshMaterial3d(ghost_mat.clone()),
+                            Transform::from_xyz(x, 2.85, z),
+                        ))
+                        .id();
+                    commands.entity(parent_entity).add_child(child);
+                }
+            }
+            // Mid Deck
+            let deck_mesh = meshes.add(Cuboid::new(3.2, 0.15, 3.2));
+            let deck = commands
+                .spawn((
+                    Mesh3d(deck_mesh),
+                    MeshMaterial3d(ghost_mat.clone()),
+                    Transform::from_xyz(0.0, 3.2, 0.0),
+                ))
+                .id();
+            commands.entity(parent_entity).add_child(deck);
+
+            // Roof Canopy (at Y = 5.8m)
+            let roof_mesh = meshes.add(Cuboid::new(3.4, 0.2, 3.4));
+            let roof = commands
+                .spawn((
+                    Mesh3d(roof_mesh),
+                    MeshMaterial3d(ghost_mat),
+                    Transform::from_xyz(0.0, 5.8, 0.0),
+                ))
+                .id();
+            commands.entity(parent_entity).add_child(roof);
+        }
+        StructureType::Staircase => {
+            let step_mesh = meshes.add(Cuboid::new(1.8, 0.25, 0.35));
+            let step_count = 10;
+            for i in 0..step_count {
+                let y = (i as f32) * 0.25 + 0.125;
+                let z = (i as f32) * 0.3 - 1.35;
+                let step = commands
+                    .spawn((
+                        Mesh3d(step_mesh.clone()),
+                        MeshMaterial3d(ghost_mat.clone()),
+                        Transform::from_xyz(0.0, y, z),
+                    ))
+                    .id();
+                commands.entity(parent_entity).add_child(step);
+            }
+            // Side Handrails
+            let rail_mesh = meshes.add(Cuboid::new(0.08, 0.08, 3.2));
+            for side in [-0.95, 0.95] {
+                let rail = commands
+                    .spawn((
+                        Mesh3d(rail_mesh.clone()),
+                        MeshMaterial3d(ghost_mat.clone()),
+                        Transform::from_xyz(side, 1.8, -0.15)
+                            .with_rotation(Quat::from_rotation_x(0.68)),
+                    ))
+                    .id();
+                commands.entity(parent_entity).add_child(rail);
+            }
+        }
+        StructureType::Ramp => {
+            let ramp_mesh = meshes.add(Cuboid::new(1.8, 0.15, 3.8));
+            let ramp = commands
+                .spawn((
+                    Mesh3d(ramp_mesh),
+                    MeshMaterial3d(ghost_mat),
+                    Transform::from_xyz(0.0, 1.15, 0.0).with_rotation(Quat::from_rotation_x(0.58)),
+                ))
+                .id();
+            commands.entity(parent_entity).add_child(ramp);
+        }
+        StructureType::WoodenBridge => {
+            let deck_mesh = meshes.add(Cuboid::new(2.4, 0.15, 5.0));
+            let deck = commands
+                .spawn((
+                    Mesh3d(deck_mesh),
+                    MeshMaterial3d(ghost_mat.clone()),
+                    Transform::from_xyz(0.0, 0.075, 0.0),
+                ))
+                .id();
+            commands.entity(parent_entity).add_child(deck);
+
+            let rail_mesh = meshes.add(Cuboid::new(0.1, 0.8, 5.0));
+            for side in [-1.25, 1.25] {
+                let rail = commands
+                    .spawn((
+                        Mesh3d(rail_mesh.clone()),
+                        MeshMaterial3d(ghost_mat.clone()),
+                        Transform::from_xyz(side, 0.45, 0.0),
+                    ))
+                    .id();
+                commands.entity(parent_entity).add_child(rail);
+            }
+        }
+        StructureType::PalisadeFence => {
+            let stake_mesh = meshes.add(Cylinder::new(0.12, 2.6));
+            for i in 0..8 {
+                let x = (i as f32) * 0.35 - 1.225;
+                let stake = commands
+                    .spawn((
+                        Mesh3d(stake_mesh.clone()),
+                        MeshMaterial3d(ghost_mat.clone()),
+                        Transform::from_xyz(x, 1.3, 0.0),
+                    ))
+                    .id();
+                commands.entity(parent_entity).add_child(stake);
+            }
+        }
+        StructureType::GraniteFortressWall => {
+            let wall_mesh = meshes.add(Cuboid::new(3.0, 2.5, 0.6));
+            let child = commands
+                .spawn((
+                    Mesh3d(wall_mesh),
+                    MeshMaterial3d(ghost_mat.clone()),
+                    Transform::from_xyz(0.0, 1.25, 0.0),
+                ))
+                .id();
+            commands.entity(parent_entity).add_child(child);
+
+            // Battlements
+            let batt_mesh = meshes.add(Cuboid::new(0.5, 0.5, 0.6));
+            for x in [-1.2, 0.0, 1.2] {
+                let batt = commands
+                    .spawn((
+                        Mesh3d(batt_mesh.clone()),
+                        MeshMaterial3d(ghost_mat.clone()),
+                        Transform::from_xyz(x, 2.75, 0.0),
+                    ))
+                    .id();
+                commands.entity(parent_entity).add_child(batt);
+            }
+        }
+        StructureType::LogTimberWall => {
+            let log_mesh = meshes.add(Cylinder::new(0.18, 3.0));
+            for row in 0..8 {
+                let y = (row as f32) * 0.32 + 0.16;
+                let log = commands
+                    .spawn((
+                        Mesh3d(log_mesh.clone()),
+                        MeshMaterial3d(ghost_mat.clone()),
+                        Transform::from_xyz(0.0, y, 0.0)
+                            .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
+                    ))
+                    .id();
+                commands.entity(parent_entity).add_child(log);
+            }
+        }
+        StructureType::CyberMetalWall => {
+            let wall_mesh = meshes.add(Cuboid::new(3.0, 2.6, 0.3));
+            let child = commands
+                .spawn((
+                    Mesh3d(wall_mesh),
+                    MeshMaterial3d(ghost_mat),
+                    Transform::from_xyz(0.0, 1.3, 0.0),
+                ))
+                .id();
+            commands.entity(parent_entity).add_child(child);
+        }
+    }
+
+    parent_entity
+}
 
 /// Spawns a procedural structure based on `StructureType`
 pub fn spawn_procedural_structure(
@@ -179,18 +392,18 @@ fn spawn_watchtower(
         perceptual_roughness: 0.85,
         ..default()
     });
-    let post_mesh = meshes.add(Cuboid::new(0.25, 5.0, 0.25));
+    let post_mesh = meshes.add(Cuboid::new(0.25, 5.7, 0.25));
 
-    // 4 Corner Support Posts (5m tall)
+    // 4 Corner Support Posts (5.7m tall)
     for x_sign in [-1.0, 1.0] {
         for z_sign in [-1.0, 1.0] {
             let post = commands
                 .spawn((
                     Mesh3d(post_mesh.clone()),
                     MeshMaterial3d(wood_mat.clone()),
-                    Transform::from_xyz(x_sign * 1.4, 2.5, z_sign * 1.4),
+                    Transform::from_xyz(x_sign * 1.4, 2.85, z_sign * 1.4),
                     avian3d::prelude::RigidBody::Static,
-                    avian3d::prelude::Collider::cuboid(0.25, 5.0, 0.25),
+                    avian3d::prelude::Collider::cuboid(0.25, 5.7, 0.25),
                     crate::play_mode::PlayModeEntity,
                 ))
                 .id();
@@ -250,24 +463,35 @@ fn spawn_watchtower(
     commands.entity(parent).add_child(r2);
     commands.entity(parent).add_child(r3);
 
-    // Ladder Rungs on Right Post
+    // Ladder Rungs on Right Post (climbable!)
     let rung_mesh = meshes.add(Cuboid::new(0.1, 0.06, 0.8));
+    let ladder_parent = commands
+        .spawn((
+            Transform::from_xyz(1.35, 1.6, 0.0),
+            Visibility::Visible,
+            InheritedVisibility::default(),
+            WatchtowerLadder,
+            crate::play_mode::PlayModeEntity,
+        ))
+        .id();
+
     for rung_idx in 0..12 {
-        let ry = 0.3 + (rung_idx as f32) * 0.26;
+        let ry = -1.3 + (rung_idx as f32) * 0.26;
         let rung = commands
             .spawn((
                 Mesh3d(rung_mesh.clone()),
                 MeshMaterial3d(wood_mat.clone()),
-                Transform::from_xyz(1.52, ry, 0.0),
+                Transform::from_xyz(0.0, ry, 0.0),
                 avian3d::prelude::RigidBody::Static,
                 avian3d::prelude::Collider::cuboid(0.1, 0.06, 0.8),
                 crate::play_mode::PlayModeEntity,
             ))
             .id();
-        commands.entity(parent).add_child(rung);
+        commands.entity(ladder_parent).add_child(rung);
     }
+    commands.entity(parent).add_child(ladder_parent);
 
-    // Roof Canopy (at Y = 5.1m)
+    // Roof Canopy (at Y = 5.8m)
     let roof_mat = materials.add(StandardMaterial {
         base_color_texture: Some(asset_server.load("textures/red_roof_shingles.png")),
         perceptual_roughness: 0.7,
@@ -278,7 +502,7 @@ fn spawn_watchtower(
         .spawn((
             Mesh3d(roof_mesh),
             MeshMaterial3d(roof_mat),
-            Transform::from_xyz(0.0, 5.1, 0.0),
+            Transform::from_xyz(0.0, 5.8, 0.0),
             avian3d::prelude::RigidBody::Static,
             avian3d::prelude::Collider::cuboid(3.4, 0.35, 3.4),
             crate::play_mode::PlayModeEntity,
@@ -296,7 +520,7 @@ fn spawn_watchtower(
                 shadow_maps_enabled: true,
                 ..default()
             },
-            Transform::from_xyz(0.0, 4.8, 0.0),
+            Transform::from_xyz(0.0, 5.4, 0.0),
             crate::play_mode::PlayModeEntity,
         ))
         .id();

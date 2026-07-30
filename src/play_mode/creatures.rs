@@ -1230,7 +1230,11 @@ pub fn creature_ai_system(
 
         match creature.creature_type {
             CreatureType::Triangaroo => {
-                // Triangaroo Hopping AI
+                // Triangaroo Hopping AI (Higher floaty hops under nighttime Black Hole gravity)
+                let bh_boost = crate::play_mode::get_black_hole_gravity_boost(time.elapsed_secs());
+                let hop_jump_impulse = 3.8 + bh_boost * 4.5;
+                let air_gravity = 9.8 - bh_boost * 4.8;
+
                 if creature.is_grounded {
                     // Slow down friction
                     creature.velocity.x *= (0.01f32).powf(dt);
@@ -1247,15 +1251,15 @@ pub fn creature_ai_system(
                         };
 
                         creature.yaw = hop_dir.z.atan2(hop_dir.x);
-                        creature.velocity.y = 3.8; // jump impulse
-                        creature.velocity.x = hop_dir.x * 3.2; // forward speed
-                        creature.velocity.z = hop_dir.z * 3.2;
+                        creature.velocity.y = hop_jump_impulse; // jump impulse boosted under black hole
+                        creature.velocity.x = hop_dir.x * (3.2 + bh_boost * 2.0); // forward speed boosted
+                        creature.velocity.z = hop_dir.z * (3.2 + bh_boost * 2.0);
                         creature.is_grounded = false;
                         creature.hop_cooldown = 0.8 + rand::random::<f32>() * 1.2;
                     }
                 } else {
-                    // In air: apply gravity
-                    creature.velocity.y -= 9.8 * dt;
+                    // In air: apply reduced gravity under black hole for soaring leaps
+                    creature.velocity.y -= air_gravity * dt;
                 }
 
                 // Apply velocity

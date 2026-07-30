@@ -812,7 +812,8 @@ pub fn cave_headlamp_system(
                         shadow_depth_bias: 0.02,
                         ..default()
                     },
-                    Transform::from_xyz(0.0, 0.0, 0.05),
+                    Transform::from_xyz(0.0, 0.0, 0.05)
+                        .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
                     PlayModeEntity,
                 ))
                 .id();

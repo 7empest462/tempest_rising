@@ -998,6 +998,13 @@ fn spawn_prefab_visuals(
     parent
 }
 
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
+#[allow(clippy::type_complexity)]
+static PROCEDURAL_MESH_CACHE: OnceLock<Mutex<HashMap<(String, u32), Handle<Mesh>>>> =
+    OnceLock::new();
+
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_prefab_visuals_children(
     commands: &mut Commands,
@@ -1011,15 +1018,33 @@ pub fn spawn_prefab_visuals_children(
     asset_server: &AssetServer,
     custom_mesh: Option<&EditableMesh>,
 ) {
+    let cache = PROCEDURAL_MESH_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut cache_guard = cache.lock().unwrap();
+
     match prefab_type {
         s if s.starts_with("tree") || s == "shrub" || s == "cactus" => {
             let seed =
                 ((position.x.abs() * 1000.0) as u32 ^ (position.z.abs() * 1000.0) as u32) | 1;
-            let (trunk_mesh, leaves_mesh) = tree_generator::build_tree_meshes(seed, s);
+            let cache_seed = (seed % 16) | 1;
+            let cache_key_trunk = (format!("{}_trunk", s), cache_seed);
+            let cache_key_leaves = (format!("{}_leaves", s), cache_seed);
+
+            let trunk_handle = if let Some(handle) = cache_guard.get(&cache_key_trunk) {
+                handle.clone()
+            } else {
+                let (trunk_mesh, leaves_mesh) = tree_generator::build_tree_meshes(cache_seed, s);
+                let t_handle = meshes.add(trunk_mesh);
+                let l_handle = meshes.add(leaves_mesh);
+                cache_guard.insert(cache_key_trunk.clone(), t_handle.clone());
+                cache_guard.insert(cache_key_leaves.clone(), l_handle.clone());
+                t_handle
+            };
+
+            let leaves_handle = cache_guard.get(&cache_key_leaves).unwrap().clone();
 
             let trunk = commands
                 .spawn((
-                    Mesh3d(meshes.add(trunk_mesh)),
+                    Mesh3d(trunk_handle),
                     MeshMaterial3d(materials.add(StandardMaterial {
                         base_color: Color::WHITE,
                         perceptual_roughness: 0.85,
@@ -1032,7 +1057,7 @@ pub fn spawn_prefab_visuals_children(
 
             let leaves = commands
                 .spawn((
-                    Mesh3d(meshes.add(leaves_mesh)),
+                    Mesh3d(leaves_handle),
                     MeshMaterial3d(materials.add(StandardMaterial {
                         base_color: Color::WHITE,
                         perceptual_roughness: 0.75,
@@ -1057,11 +1082,21 @@ pub fn spawn_prefab_visuals_children(
             let scale_y = 0.6 + next_rand() * 0.4;
             let scale_z = 0.8 + next_rand() * 0.6;
 
-            let rock_mesh = tree_generator::build_rock_mesh(seed);
+            let cache_seed = (seed % 16) | 1;
+            let cache_key = ("rock".to_string(), cache_seed);
+
+            let rock_handle = if let Some(handle) = cache_guard.get(&cache_key) {
+                handle.clone()
+            } else {
+                let rock_mesh = tree_generator::build_rock_mesh(cache_seed);
+                let handle = meshes.add(rock_mesh);
+                cache_guard.insert(cache_key, handle.clone());
+                handle
+            };
 
             let rock = commands
                 .spawn((
-                    Mesh3d(meshes.add(rock_mesh)),
+                    Mesh3d(rock_handle),
                     MeshMaterial3d(materials.add(StandardMaterial {
                         base_color: Color::WHITE,
                         perceptual_roughness: 0.95,
@@ -1083,7 +1118,17 @@ pub fn spawn_prefab_visuals_children(
                 (lcg_s as f32) / (u32::MAX as f32)
             };
 
-            let rock_mesh = tree_generator::build_rock_mesh(seed);
+            let cache_seed = (seed % 16) | 1;
+            let cache_key = (s.to_string(), cache_seed);
+
+            let rock_handle = if let Some(handle) = cache_guard.get(&cache_key) {
+                handle.clone()
+            } else {
+                let rock_mesh = tree_generator::build_rock_mesh(cache_seed);
+                let handle = meshes.add(rock_mesh);
+                cache_guard.insert(cache_key, handle.clone());
+                handle
+            };
 
             let base_color = if s == "ore_granite" {
                 Color::srgb(0.2, 0.2, 0.22)
@@ -1093,7 +1138,7 @@ pub fn spawn_prefab_visuals_children(
 
             let base_rock = commands
                 .spawn((
-                    Mesh3d(meshes.add(rock_mesh)),
+                    Mesh3d(rock_handle),
                     MeshMaterial3d(materials.add(StandardMaterial {
                         base_color,
                         perceptual_roughness: 0.9,
@@ -1162,11 +1207,20 @@ pub fn spawn_prefab_visuals_children(
                 let offset_y = 0.2 + next_rand() * 0.2;
                 let offset_z = (next_rand() - 0.5) * 0.5;
 
-                let shard_mesh = tree_generator::build_rock_mesh(seed + i + 1);
+                let shard_seed = ((seed + i + 1) % 16) | 1;
+                let shard_key = ("crystal_shard".to_string(), shard_seed);
+                let shard_handle = if let Some(handle) = cache_guard.get(&shard_key) {
+                    handle.clone()
+                } else {
+                    let mesh = tree_generator::build_rock_mesh(shard_seed);
+                    let handle = meshes.add(mesh);
+                    cache_guard.insert(shard_key, handle.clone());
+                    handle
+                };
 
                 let shard = commands
                     .spawn((
-                        Mesh3d(meshes.add(shard_mesh)),
+                        Mesh3d(shard_handle),
                         MeshMaterial3d(crystal_mat.clone()),
                         Transform::from_translation(Vec3::new(offset_x, offset_y, offset_z))
                             .with_rotation(Quat::from_euler(EulerRot::YXZ, ry, rx, rz))

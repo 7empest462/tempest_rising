@@ -6,14 +6,16 @@ use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
 pub struct CharacterDesignerPlugin;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Gender {
     #[default]
     Male,
     Female,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum HairStyle {
     #[default]
     None,
@@ -23,10 +25,21 @@ pub enum HairStyle {
     Curly,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum OutfitStyle {
+    #[default]
+    SciFiSuit,
+    TacticalArmor,
+    StylizedHero,
+    SkeletonExoFrame,
+    ClassicMannequin,
+}
+
 #[allow(dead_code)]
 #[derive(Resource)]
 pub struct CharacterSettings {
     pub gender: Gender,
+    pub outfit_style: OutfitStyle,
     pub height: f32, // 1.2 to 2.2
     pub weight: f32, // 0.5 to 1.5
     pub skin_color: Color,
@@ -49,6 +62,7 @@ impl Default for CharacterSettings {
     fn default() -> Self {
         Self {
             gender: Gender::Male,
+            outfit_style: OutfitStyle::SciFiSuit,
             height: 1.75,
             weight: 1.0,
             skin_color: Color::srgb(0.9, 0.72, 0.62),
@@ -205,10 +219,14 @@ fn cleanup_character_designer(
     visuals: Query<Entity, With<BoneVisual>>,
 ) {
     for entity in query.iter() {
-        commands.entity(entity).despawn();
+        if let Ok(mut cmd) = commands.get_entity(entity) {
+            cmd.despawn();
+        }
     }
     for entity in visuals.iter() {
-        commands.entity(entity).despawn();
+        if let Ok(mut cmd) = commands.get_entity(entity) {
+            cmd.despawn();
+        }
     }
 }
 
@@ -704,19 +722,110 @@ fn add_skeletal_triangle(
     indices.push(start_idx + 2);
 }
 
-fn spawn_character_visuals(
+pub fn spawn_character_visuals(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     settings: &CharacterSettings,
     physics: &RagdollPhysics,
 ) {
+    // Skin & Basic Materials
     let skin_mat = materials.add(StandardMaterial {
         base_color: settings.skin_color,
         perceptual_roughness: 0.65,
         ..default()
     });
 
+    // 1. Sci-Fi Suit Materials
+    let scifi_suit_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.12, 0.16, 0.24), // Slate suit
+        metallic: 0.75,
+        perceptual_roughness: 0.25,
+        ..default()
+    });
+    let scifi_visor_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.0, 0.9, 1.0),
+        emissive: LinearRgba::new(0.0, 6.0, 12.0, 1.0),
+        unlit: true,
+        ..default()
+    });
+    let scifi_core_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.45, 0.0),
+        emissive: LinearRgba::new(12.0, 5.0, 0.0, 1.0),
+        unlit: true,
+        ..default()
+    });
+    let scifi_trim_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.85, 0.65, 0.15), // Gold trim
+        metallic: 0.9,
+        perceptual_roughness: 0.2,
+        ..default()
+    });
+
+    // 2. Tactical Armor Materials
+    let tac_vest_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.16, 0.20, 0.16), // Military olive
+        perceptual_roughness: 0.8,
+        ..default()
+    });
+    let tac_camo_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.10, 0.12, 0.15), // Tactical dark grey
+        perceptual_roughness: 0.85,
+        ..default()
+    });
+    let tac_nvg_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.0, 1.0, 0.4),
+        emissive: LinearRgba::new(0.0, 8.0, 2.0, 1.0),
+        unlit: true,
+        ..default()
+    });
+    let tac_plate_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.06, 0.06, 0.07),
+        metallic: 0.3,
+        perceptual_roughness: 0.4,
+        ..default()
+    });
+
+    // 3. Stylized Hero Materials
+    let hero_jacket_mat = materials.add(StandardMaterial {
+        base_color: if settings.gender == Gender::Male {
+            Color::srgb(0.75, 0.18, 0.12)
+        } else {
+            Color::srgb(0.12, 0.52, 0.75)
+        },
+        perceptual_roughness: 0.5,
+        ..default()
+    });
+    let hero_pants_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.08, 0.12, 0.22),
+        perceptual_roughness: 0.7,
+        ..default()
+    });
+    let hero_boots_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.15, 0.10, 0.07),
+        perceptual_roughness: 0.6,
+        ..default()
+    });
+    let eye_white_mat = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        perceptual_roughness: 0.1,
+        ..default()
+    });
+    let eye_pupil_mat = materials.add(StandardMaterial {
+        base_color: Color::BLACK,
+        perceptual_roughness: 0.1,
+        ..default()
+    });
+
+    // 4. Skeleton Exo Frame Materials
+    let exo_glass_mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.1, 0.65, 0.95, 0.35),
+        alpha_mode: AlphaMode::Blend,
+        perceptual_roughness: 0.15,
+        ..default()
+    });
+
+    // 5. Classic Materials
     let shirt_mat = materials.add(StandardMaterial {
         base_color: if settings.gender == Gender::Male {
             Color::srgb(0.15, 0.45, 0.75)
@@ -726,27 +835,31 @@ fn spawn_character_visuals(
         perceptual_roughness: 0.55,
         ..default()
     });
-
     let pants_mat = materials.add(StandardMaterial {
         base_color: Color::srgb(0.12, 0.15, 0.22),
         perceptual_roughness: 0.75,
         ..default()
     });
-
     let eye_mat = materials.add(StandardMaterial {
         base_color: settings.eye_color,
         perceptual_roughness: 0.1,
         ..default()
     });
-
     let hair_mat = materials.add(StandardMaterial {
         base_color: settings.hair_color,
         perceptual_roughness: 0.85,
         ..default()
     });
-
     let bone_mat = materials.add(StandardMaterial {
-        base_color: Color::WHITE,
+        base_color: match settings.outfit_style {
+            OutfitStyle::SkeletonExoFrame => Color::srgb(0.2, 0.9, 1.0),
+            _ => Color::WHITE,
+        },
+        emissive: match settings.outfit_style {
+            OutfitStyle::SkeletonExoFrame => LinearRgba::new(2.5, 7.0, 10.0, 1.0),
+            _ => LinearRgba::BLACK,
+        },
+        unlit: settings.outfit_style == OutfitStyle::SkeletonExoFrame,
         perceptual_roughness: 0.85,
         ..default()
     });
@@ -755,15 +868,52 @@ fn spawn_character_visuals(
         let is_head = node.name == "Head";
         let is_torso = node.name == "Pelvis" || node.name == "Spine" || node.name == "Chest";
         let is_pants_area = node.name == "Pelvis" || node.name == "L_Hip" || node.name == "R_Hip";
+        let is_foot = node.name == "L_Foot" || node.name == "R_Foot";
 
-        let skin_mat_to_use = if is_head {
-            skin_mat.clone()
-        } else if is_pants_area {
-            pants_mat.clone()
-        } else if is_torso {
-            shirt_mat.clone()
-        } else {
-            skin_mat.clone()
+        let skin_mat_to_use = match settings.outfit_style {
+            OutfitStyle::SciFiSuit => {
+                if is_head || is_torso || is_pants_area {
+                    scifi_suit_mat.clone()
+                } else if is_foot {
+                    scifi_trim_mat.clone()
+                } else {
+                    scifi_suit_mat.clone()
+                }
+            }
+            OutfitStyle::TacticalArmor => {
+                if is_torso || is_pants_area {
+                    tac_vest_mat.clone()
+                } else if is_foot {
+                    tac_plate_mat.clone()
+                } else {
+                    tac_camo_mat.clone()
+                }
+            }
+            OutfitStyle::StylizedHero => {
+                if is_head {
+                    skin_mat.clone()
+                } else if is_pants_area {
+                    hero_pants_mat.clone()
+                } else if is_torso {
+                    hero_jacket_mat.clone()
+                } else if is_foot {
+                    hero_boots_mat.clone()
+                } else {
+                    skin_mat.clone()
+                }
+            }
+            OutfitStyle::SkeletonExoFrame => exo_glass_mat.clone(),
+            OutfitStyle::ClassicMannequin => {
+                if is_head {
+                    skin_mat.clone()
+                } else if is_pants_area {
+                    pants_mat.clone()
+                } else if is_torso {
+                    shirt_mat.clone()
+                } else {
+                    skin_mat.clone()
+                }
+            }
         };
 
         let mesh_radius = node.radius;
@@ -784,7 +934,7 @@ fn spawn_character_visuals(
             ))
             .id();
 
-        // 2. Spawn Inner Skeleton Joint (Skull, Ribcage, Pelvis, Knobby bones)
+        // 2. Spawn Inner Skeleton Joint
         let bone_mesh = build_stylized_bone_mesh(&node.name, mesh_radius);
         commands.spawn((
             Mesh3d(meshes.add(bone_mesh)),
@@ -798,267 +948,619 @@ fn spawn_character_visuals(
             CharacterModelPart,
         ));
 
-        // Hair and eyes are placed under the outer skin Head node
-        if is_head {
-            let eye_mesh = meshes.add(Sphere::new(mesh_radius * 0.2).mesh().ico(3).unwrap());
-
-            let le = commands
-                .spawn((
-                    Mesh3d(eye_mesh.clone()),
-                    MeshMaterial3d(eye_mat.clone()),
-                    Transform::from_translation(Vec3::new(
-                        -mesh_radius * 0.35,
-                        mesh_radius * 0.15,
-                        mesh_radius * 0.85,
-                    )),
-                    CharacterVisualEntity,
-                    CharacterModelPart,
-                ))
-                .id();
-            commands.entity(outer_node_entity).add_child(le);
-
-            let re = commands
-                .spawn((
-                    Mesh3d(eye_mesh),
-                    MeshMaterial3d(eye_mat.clone()),
-                    Transform::from_translation(Vec3::new(
+        // Node accessories based on OutfitStyle & Node Name
+        match settings.outfit_style {
+            OutfitStyle::SciFiSuit => {
+                if is_head {
+                    // Cyber Visor Bar across face
+                    let visor_mesh = meshes.add(Cuboid::new(
+                        mesh_radius * 1.5,
                         mesh_radius * 0.35,
-                        mesh_radius * 0.15,
-                        mesh_radius * 0.85,
-                    )),
-                    CharacterVisualEntity,
-                    CharacterModelPart,
-                ))
-                .id();
-            commands.entity(outer_node_entity).add_child(re);
-
-            match settings.hair_style {
-                HairStyle::None => {}
-                HairStyle::Short => {
-                    let cap_mesh =
-                        meshes.add(Sphere::new(mesh_radius * 1.03).mesh().ico(4).unwrap());
-                    let cap = commands
+                        mesh_radius * 0.45,
+                    ));
+                    let visor = commands
                         .spawn((
-                            Mesh3d(cap_mesh),
-                            MeshMaterial3d(hair_mat.clone()),
+                            Mesh3d(visor_mesh),
+                            MeshMaterial3d(scifi_visor_mat.clone()),
                             Transform::from_translation(Vec3::new(
                                 0.0,
-                                mesh_radius * 0.25,
-                                -mesh_radius * 0.1,
-                            )),
-                            CharacterVisualEntity,
-                            CharacterModelPart,
-                        ))
-                        .id();
-                    commands.entity(outer_node_entity).add_child(cap);
-
-                    // Sideburns
-                    let sideburn_mesh = meshes.add(Cuboid::new(
-                        mesh_radius * 0.12,
-                        mesh_radius * 0.45,
-                        mesh_radius * 0.22,
-                    ));
-
-                    let sb_l = commands
-                        .spawn((
-                            Mesh3d(sideburn_mesh.clone()),
-                            MeshMaterial3d(hair_mat.clone()),
-                            Transform::from_translation(Vec3::new(
-                                -mesh_radius * 0.98,
                                 mesh_radius * 0.1,
-                                mesh_radius * 0.2,
+                                mesh_radius * 0.75,
                             )),
                             CharacterVisualEntity,
                             CharacterModelPart,
                         ))
                         .id();
-                    commands.entity(outer_node_entity).add_child(sb_l);
+                    commands.entity(outer_node_entity).add_child(visor);
 
-                    let sb_r = commands
-                        .spawn((
-                            Mesh3d(sideburn_mesh),
-                            MeshMaterial3d(hair_mat.clone()),
-                            Transform::from_translation(Vec3::new(
-                                mesh_radius * 0.98,
-                                mesh_radius * 0.1,
-                                mesh_radius * 0.2,
-                            )),
-                            CharacterVisualEntity,
-                            CharacterModelPart,
-                        ))
-                        .id();
-                    commands.entity(outer_node_entity).add_child(sb_r);
-
-                    // Front bangs/fringe
-                    let bang_mesh = meshes.add(Cuboid::new(
-                        mesh_radius * 0.35,
-                        mesh_radius * 0.2,
-                        mesh_radius * 0.22,
-                    ));
-                    for i in 0..3 {
-                        let offset_x = (i as f32 - 1.0) * mesh_radius * 0.32;
-                        let bang_id = commands
+                    // Helmet Gold Ear Comm Pads
+                    let comm_mesh =
+                        meshes.add(Cylinder::new(mesh_radius * 0.22, mesh_radius * 0.15));
+                    for dir in &[-1.0f32, 1.0f32] {
+                        let comm = commands
                             .spawn((
-                                Mesh3d(bang_mesh.clone()),
+                                Mesh3d(comm_mesh.clone()),
+                                MeshMaterial3d(scifi_trim_mat.clone()),
+                                Transform::from_translation(Vec3::new(
+                                    dir * mesh_radius * 0.95,
+                                    mesh_radius * 0.1,
+                                    0.0,
+                                ))
+                                .with_rotation(Quat::from_rotation_z(dir * 1.57)),
+                                CharacterVisualEntity,
+                                CharacterModelPart,
+                            ))
+                            .id();
+                        commands.entity(outer_node_entity).add_child(comm);
+                    }
+                } else if node.name == "Chest" {
+                    // Arc Reactor Chest Core
+                    let core_mesh =
+                        meshes.add(Sphere::new(mesh_radius * 0.42).mesh().ico(3).unwrap());
+                    let core = commands
+                        .spawn((
+                            Mesh3d(core_mesh),
+                            MeshMaterial3d(scifi_core_mat.clone()),
+                            Transform::from_translation(Vec3::new(
+                                0.0,
+                                mesh_radius * 0.2,
+                                mesh_radius * 0.85,
+                            )),
+                            CharacterVisualEntity,
+                            CharacterModelPart,
+                        ))
+                        .id();
+                    commands.entity(outer_node_entity).add_child(core);
+
+                    // Gold Chest Armor Collar
+                    let armor_plate = meshes.add(Cuboid::new(
+                        mesh_radius * 1.8,
+                        mesh_radius * 0.4,
+                        mesh_radius * 0.6,
+                    ));
+                    let plate = commands
+                        .spawn((
+                            Mesh3d(armor_plate),
+                            MeshMaterial3d(scifi_trim_mat.clone()),
+                            Transform::from_translation(Vec3::new(
+                                0.0,
+                                mesh_radius * 0.6,
+                                mesh_radius * 0.5,
+                            )),
+                            CharacterVisualEntity,
+                            CharacterModelPart,
+                        ))
+                        .id();
+                    commands.entity(outer_node_entity).add_child(plate);
+                } else if node.name == "L_Shoulder" || node.name == "R_Shoulder" {
+                    // Shoulder Pauldron Guard
+                    let pauldron_mesh =
+                        meshes.add(Sphere::new(mesh_radius * 1.25).mesh().ico(3).unwrap());
+                    let pauldron = commands
+                        .spawn((
+                            Mesh3d(pauldron_mesh),
+                            MeshMaterial3d(scifi_trim_mat.clone()),
+                            Transform::from_translation(Vec3::new(0.0, mesh_radius * 0.2, 0.0)),
+                            CharacterVisualEntity,
+                            CharacterModelPart,
+                        ))
+                        .id();
+                    commands.entity(outer_node_entity).add_child(pauldron);
+                } else if is_foot {
+                    // Magnetized Boots
+                    let boot_mesh = meshes.add(Cuboid::new(
+                        mesh_radius * 1.1,
+                        mesh_radius * 0.6,
+                        mesh_radius * 1.6,
+                    ));
+                    let boot = commands
+                        .spawn((
+                            Mesh3d(boot_mesh),
+                            MeshMaterial3d(scifi_trim_mat.clone()),
+                            Transform::from_translation(Vec3::new(
+                                0.0,
+                                -mesh_radius * 0.2,
+                                mesh_radius * 0.3,
+                            )),
+                            CharacterVisualEntity,
+                            CharacterModelPart,
+                        ))
+                        .id();
+                    commands.entity(outer_node_entity).add_child(boot);
+                }
+            }
+            OutfitStyle::TacticalArmor => {
+                if is_head {
+                    // Military Helmet Brim
+                    let brim_mesh = meshes.add(Cuboid::new(
+                        mesh_radius * 1.8,
+                        mesh_radius * 0.15,
+                        mesh_radius * 1.8,
+                    ));
+                    let brim = commands
+                        .spawn((
+                            Mesh3d(brim_mesh),
+                            MeshMaterial3d(tac_vest_mat.clone()),
+                            Transform::from_translation(Vec3::new(0.0, mesh_radius * 0.45, 0.0)),
+                            CharacterVisualEntity,
+                            CharacterModelPart,
+                        ))
+                        .id();
+                    commands.entity(outer_node_entity).add_child(brim);
+
+                    // Dual NVG Night Vision Goggles
+                    let nvg_mesh = meshes.add(Cylinder::new(mesh_radius * 0.18, mesh_radius * 0.4));
+                    for dir in &[-0.32f32, 0.32f32] {
+                        let nvg = commands
+                            .spawn((
+                                Mesh3d(nvg_mesh.clone()),
+                                MeshMaterial3d(tac_nvg_mat.clone()),
+                                Transform::from_translation(Vec3::new(
+                                    dir * mesh_radius,
+                                    mesh_radius * 0.25,
+                                    mesh_radius * 0.85,
+                                ))
+                                .with_rotation(Quat::from_rotation_x(1.57)),
+                                CharacterVisualEntity,
+                                CharacterModelPart,
+                            ))
+                            .id();
+                        commands.entity(outer_node_entity).add_child(nvg);
+                    }
+
+                    // Respirator Face Mask
+                    let mask_mesh = meshes.add(Cuboid::new(
+                        mesh_radius * 0.95,
+                        mesh_radius * 0.45,
+                        mesh_radius * 0.55,
+                    ));
+                    let mask = commands
+                        .spawn((
+                            Mesh3d(mask_mesh),
+                            MeshMaterial3d(tac_plate_mat.clone()),
+                            Transform::from_translation(Vec3::new(
+                                0.0,
+                                -mesh_radius * 0.2,
+                                mesh_radius * 0.7,
+                            )),
+                            CharacterVisualEntity,
+                            CharacterModelPart,
+                        ))
+                        .id();
+                    commands.entity(outer_node_entity).add_child(mask);
+                } else if node.name == "Chest" {
+                    // Tactical Kevlar Vest with pouches
+                    let vest_mesh = meshes.add(Cuboid::new(
+                        mesh_radius * 1.8,
+                        mesh_radius * 1.4,
+                        mesh_radius * 0.6,
+                    ));
+                    let vest = commands
+                        .spawn((
+                            Mesh3d(vest_mesh),
+                            MeshMaterial3d(tac_vest_mat.clone()),
+                            Transform::from_translation(Vec3::new(0.0, 0.0, mesh_radius * 0.2)),
+                            CharacterVisualEntity,
+                            CharacterModelPart,
+                        ))
+                        .id();
+                    commands.entity(outer_node_entity).add_child(vest);
+
+                    // Ammo Mag Pouches
+                    let pouch_mesh = meshes.add(Cuboid::new(
+                        mesh_radius * 0.35,
+                        mesh_radius * 0.5,
+                        mesh_radius * 0.25,
+                    ));
+                    for px in &[-0.5f32, 0.0f32, 0.5f32] {
+                        let pouch = commands
+                            .spawn((
+                                Mesh3d(pouch_mesh.clone()),
+                                MeshMaterial3d(tac_plate_mat.clone()),
+                                Transform::from_translation(Vec3::new(
+                                    px * mesh_radius,
+                                    -mesh_radius * 0.2,
+                                    mesh_radius * 0.8,
+                                )),
+                                CharacterVisualEntity,
+                                CharacterModelPart,
+                            ))
+                            .id();
+                        commands.entity(outer_node_entity).add_child(pouch);
+                    }
+                } else if node.name == "L_Knee"
+                    || node.name == "R_Knee"
+                    || node.name == "L_Elbow"
+                    || node.name == "R_Elbow"
+                {
+                    // Molded Hard-Shell Joint Guards
+                    let pad_mesh =
+                        meshes.add(Sphere::new(mesh_radius * 1.15).mesh().ico(3).unwrap());
+                    let pad = commands
+                        .spawn((
+                            Mesh3d(pad_mesh),
+                            MeshMaterial3d(tac_plate_mat.clone()),
+                            Transform::from_translation(Vec3::new(0.0, 0.0, mesh_radius * 0.2)),
+                            CharacterVisualEntity,
+                            CharacterModelPart,
+                        ))
+                        .id();
+                    commands.entity(outer_node_entity).add_child(pad);
+                } else if is_foot {
+                    // Tactical Combat Boots
+                    let boot_mesh = meshes.add(Cuboid::new(
+                        mesh_radius * 1.1,
+                        mesh_radius * 0.7,
+                        mesh_radius * 1.6,
+                    ));
+                    let boot = commands
+                        .spawn((
+                            Mesh3d(boot_mesh),
+                            MeshMaterial3d(tac_plate_mat.clone()),
+                            Transform::from_translation(Vec3::new(
+                                0.0,
+                                -mesh_radius * 0.2,
+                                mesh_radius * 0.3,
+                            )),
+                            CharacterVisualEntity,
+                            CharacterModelPart,
+                        ))
+                        .id();
+                    commands.entity(outer_node_entity).add_child(boot);
+                }
+            }
+            OutfitStyle::StylizedHero => {
+                if is_head {
+                    // Eye sockets + White Sclera + Iris + Pupil
+                    let eye_white_mesh =
+                        meshes.add(Sphere::new(mesh_radius * 0.22).mesh().ico(3).unwrap());
+                    let eye_iris_mesh =
+                        meshes.add(Sphere::new(mesh_radius * 0.13).mesh().ico(3).unwrap());
+                    let pupil_mesh =
+                        meshes.add(Sphere::new(mesh_radius * 0.06).mesh().ico(3).unwrap());
+                    let eyebrow_mesh = meshes.add(Cuboid::new(
+                        mesh_radius * 0.35,
+                        mesh_radius * 0.05,
+                        mesh_radius * 0.08,
+                    ));
+
+                    for (side, offset_x) in
+                        [(-1.0f32, -mesh_radius * 0.35), (1.0f32, mesh_radius * 0.35)]
+                    {
+                        let ew = commands
+                            .spawn((
+                                Mesh3d(eye_white_mesh.clone()),
+                                MeshMaterial3d(eye_white_mat.clone()),
+                                Transform::from_translation(Vec3::new(
+                                    offset_x,
+                                    mesh_radius * 0.15,
+                                    mesh_radius * 0.85,
+                                )),
+                                CharacterVisualEntity,
+                                CharacterModelPart,
+                            ))
+                            .id();
+                        commands.entity(outer_node_entity).add_child(ew);
+
+                        let ei = commands
+                            .spawn((
+                                Mesh3d(eye_iris_mesh.clone()),
+                                MeshMaterial3d(eye_mat.clone()),
+                                Transform::from_translation(Vec3::new(
+                                    offset_x,
+                                    mesh_radius * 0.15,
+                                    mesh_radius * 0.96,
+                                )),
+                                CharacterVisualEntity,
+                                CharacterModelPart,
+                            ))
+                            .id();
+                        commands.entity(outer_node_entity).add_child(ei);
+
+                        let ep = commands
+                            .spawn((
+                                Mesh3d(pupil_mesh.clone()),
+                                MeshMaterial3d(eye_pupil_mat.clone()),
+                                Transform::from_translation(Vec3::new(
+                                    offset_x,
+                                    mesh_radius * 0.15,
+                                    mesh_radius * 1.02,
+                                )),
+                                CharacterVisualEntity,
+                                CharacterModelPart,
+                            ))
+                            .id();
+                        commands.entity(outer_node_entity).add_child(ep);
+
+                        let eb = commands
+                            .spawn((
+                                Mesh3d(eyebrow_mesh.clone()),
                                 MeshMaterial3d(hair_mat.clone()),
                                 Transform::from_translation(Vec3::new(
                                     offset_x,
-                                    mesh_radius * 0.8,
+                                    mesh_radius * 0.38,
                                     mesh_radius * 0.85,
                                 ))
-                                .with_rotation(Quat::from_rotation_x(-0.25)),
+                                .with_rotation(Quat::from_rotation_z(side * -0.15)),
                                 CharacterVisualEntity,
                                 CharacterModelPart,
                             ))
                             .id();
-                        commands.entity(outer_node_entity).add_child(bang_id);
+                        commands.entity(outer_node_entity).add_child(eb);
                     }
-                }
-                HairStyle::Ponytail => {
-                    let cap_mesh =
-                        meshes.add(Sphere::new(mesh_radius * 1.02).mesh().ico(4).unwrap());
-                    let cap = commands
-                        .spawn((
-                            Mesh3d(cap_mesh),
-                            MeshMaterial3d(hair_mat.clone()),
-                            Transform::from_translation(Vec3::new(
-                                0.0,
-                                mesh_radius * 0.33,
-                                -mesh_radius * 0.15,
-                            )),
-                            CharacterVisualEntity,
-                            CharacterModelPart,
-                        ))
-                        .id();
-                    commands.entity(outer_node_entity).add_child(cap);
 
-                    let tail_mesh =
-                        meshes.add(Sphere::new(mesh_radius * 0.4).mesh().ico(3).unwrap());
-                    let tail = commands
+                    // Nose / Jaw structure
+                    let nose_mesh = meshes.add(Cuboid::new(
+                        mesh_radius * 0.12,
+                        mesh_radius * 0.25,
+                        mesh_radius * 0.25,
+                    ));
+                    let nose = commands
                         .spawn((
-                            Mesh3d(tail_mesh),
-                            MeshMaterial3d(hair_mat.clone()),
+                            Mesh3d(nose_mesh),
+                            MeshMaterial3d(skin_mat.clone()),
                             Transform::from_translation(Vec3::new(
                                 0.0,
-                                mesh_radius * 0.48,
-                                -mesh_radius * 1.15,
+                                -mesh_radius * 0.05,
+                                mesh_radius * 0.95,
                             )),
                             CharacterVisualEntity,
                             CharacterModelPart,
                         ))
                         .id();
-                    commands.entity(outer_node_entity).add_child(tail);
-                }
-                HairStyle::Spiky => {
-                    let cap_mesh =
-                        meshes.add(Sphere::new(mesh_radius * 1.02).mesh().ico(4).unwrap());
-                    let spike_parent = commands
-                        .spawn((
-                            Mesh3d(cap_mesh),
-                            MeshMaterial3d(hair_mat.clone()),
-                            Transform::from_translation(Vec3::new(
-                                0.0,
-                                mesh_radius * 0.33,
-                                -mesh_radius * 0.15,
-                            )),
-                            CharacterVisualEntity,
-                            CharacterModelPart,
-                        ))
-                        .id();
-                    commands.entity(outer_node_entity).add_child(spike_parent);
+                    commands.entity(outer_node_entity).add_child(nose);
 
-                    for i in 0..5 {
-                        let angle = (i as f32) * 0.6 - 1.2;
-                        let cone_mesh = meshes.add(
-                            Cone {
-                                radius: mesh_radius * 0.15,
-                                height: mesh_radius * 0.5,
-                            }
-                            .mesh(),
-                        );
-                        let spike = commands
-                            .spawn((
-                                Mesh3d(cone_mesh),
-                                MeshMaterial3d(hair_mat.clone()),
-                                Transform::from_translation(Vec3::new(
-                                    angle * mesh_radius * 0.5,
-                                    mesh_radius * 0.9,
-                                    mesh_radius * 0.2,
-                                ))
-                                .with_rotation(Quat::from_rotation_z(-angle)),
-                                CharacterVisualEntity,
-                                CharacterModelPart,
-                            ))
-                            .id();
-                        commands.entity(spike_parent).add_child(spike);
-                    }
-                }
-                HairStyle::Curly => {
-                    let cap_mesh =
-                        meshes.add(Sphere::new(mesh_radius * 1.02).mesh().ico(4).unwrap());
-                    let curly_parent = commands
-                        .spawn((
-                            Mesh3d(cap_mesh),
-                            MeshMaterial3d(hair_mat.clone()),
-                            Transform::from_translation(Vec3::new(
-                                0.0,
-                                mesh_radius * 0.33,
-                                -mesh_radius * 0.15,
-                            )),
-                            CharacterVisualEntity,
-                            CharacterModelPart,
-                        ))
-                        .id();
-                    commands.entity(outer_node_entity).add_child(curly_parent);
-
-                    for x in -2..=2 {
-                        for z in -2..=1 {
-                            let curl =
-                                meshes.add(Sphere::new(mesh_radius * 0.22).mesh().ico(3).unwrap());
-                            let curl_ent = commands
+                    // Hair mesh
+                    match settings.hair_style {
+                        HairStyle::None => {}
+                        HairStyle::Short => {
+                            let cap_mesh =
+                                meshes.add(Sphere::new(mesh_radius * 1.04).mesh().ico(4).unwrap());
+                            let cap = commands
                                 .spawn((
-                                    Mesh3d(curl),
+                                    Mesh3d(cap_mesh),
                                     MeshMaterial3d(hair_mat.clone()),
                                     Transform::from_translation(Vec3::new(
-                                        x as f32 * mesh_radius * 0.35,
-                                        mesh_radius * 0.95,
-                                        z as f32 * mesh_radius * 0.35 - mesh_radius * 0.05,
+                                        0.0,
+                                        mesh_radius * 0.25,
+                                        -mesh_radius * 0.1,
                                     )),
                                     CharacterVisualEntity,
                                     CharacterModelPart,
                                 ))
                                 .id();
-                            commands.entity(curly_parent).add_child(curl_ent);
+                            commands.entity(outer_node_entity).add_child(cap);
                         }
+                        HairStyle::Ponytail => {
+                            let cap_mesh =
+                                meshes.add(Sphere::new(mesh_radius * 1.03).mesh().ico(4).unwrap());
+                            let cap = commands
+                                .spawn((
+                                    Mesh3d(cap_mesh),
+                                    MeshMaterial3d(hair_mat.clone()),
+                                    Transform::from_translation(Vec3::new(
+                                        0.0,
+                                        mesh_radius * 0.33,
+                                        -mesh_radius * 0.15,
+                                    )),
+                                    CharacterVisualEntity,
+                                    CharacterModelPart,
+                                ))
+                                .id();
+                            commands.entity(outer_node_entity).add_child(cap);
+                        }
+                        HairStyle::Spiky => {
+                            let cap_mesh =
+                                meshes.add(Sphere::new(mesh_radius * 1.02).mesh().ico(4).unwrap());
+                            let cap = commands
+                                .spawn((
+                                    Mesh3d(cap_mesh),
+                                    MeshMaterial3d(hair_mat.clone()),
+                                    Transform::from_translation(Vec3::new(
+                                        0.0,
+                                        mesh_radius * 0.33,
+                                        -mesh_radius * 0.15,
+                                    )),
+                                    CharacterVisualEntity,
+                                    CharacterModelPart,
+                                ))
+                                .id();
+                            commands.entity(outer_node_entity).add_child(cap);
+                        }
+                        HairStyle::Curly => {
+                            let cap_mesh =
+                                meshes.add(Sphere::new(mesh_radius * 1.02).mesh().ico(4).unwrap());
+                            let cap = commands
+                                .spawn((
+                                    Mesh3d(cap_mesh),
+                                    MeshMaterial3d(hair_mat.clone()),
+                                    Transform::from_translation(Vec3::new(
+                                        0.0,
+                                        mesh_radius * 0.33,
+                                        -mesh_radius * 0.15,
+                                    )),
+                                    CharacterVisualEntity,
+                                    CharacterModelPart,
+                                ))
+                                .id();
+                            commands.entity(outer_node_entity).add_child(cap);
+                        }
+                    }
+                } else if node.name == "Chest" {
+                    // Hero Jacket Lapel Collar
+                    let lapel_mesh = meshes.add(Cuboid::new(
+                        mesh_radius * 1.6,
+                        mesh_radius * 0.4,
+                        mesh_radius * 0.7,
+                    ));
+                    let lapel = commands
+                        .spawn((
+                            Mesh3d(lapel_mesh),
+                            MeshMaterial3d(hero_jacket_mat.clone()),
+                            Transform::from_translation(Vec3::new(
+                                0.0,
+                                mesh_radius * 0.5,
+                                mesh_radius * 0.3,
+                            )),
+                            CharacterVisualEntity,
+                            CharacterModelPart,
+                        ))
+                        .id();
+                    commands.entity(outer_node_entity).add_child(lapel);
+                } else if is_foot {
+                    // Leather Boots
+                    let boot_mesh = meshes.add(Cuboid::new(
+                        mesh_radius * 1.0,
+                        mesh_radius * 0.6,
+                        mesh_radius * 1.5,
+                    ));
+                    let boot = commands
+                        .spawn((
+                            Mesh3d(boot_mesh),
+                            MeshMaterial3d(hero_boots_mat.clone()),
+                            Transform::from_translation(Vec3::new(
+                                0.0,
+                                -mesh_radius * 0.2,
+                                mesh_radius * 0.3,
+                            )),
+                            CharacterVisualEntity,
+                            CharacterModelPart,
+                        ))
+                        .id();
+                    commands.entity(outer_node_entity).add_child(boot);
+                }
+            }
+            OutfitStyle::SkeletonExoFrame => {
+                // Outer skin is translucent glass shell, skeleton is glowing neon cyan
+            }
+            OutfitStyle::ClassicMannequin => {
+                if is_head {
+                    let eye_mesh =
+                        meshes.add(Sphere::new(mesh_radius * 0.2).mesh().ico(3).unwrap());
+                    for offset_x in [-mesh_radius * 0.35, mesh_radius * 0.35] {
+                        let e = commands
+                            .spawn((
+                                Mesh3d(eye_mesh.clone()),
+                                MeshMaterial3d(eye_mat.clone()),
+                                Transform::from_translation(Vec3::new(
+                                    offset_x,
+                                    mesh_radius * 0.15,
+                                    mesh_radius * 0.85,
+                                )),
+                                CharacterVisualEntity,
+                                CharacterModelPart,
+                            ))
+                            .id();
+                        commands.entity(outer_node_entity).add_child(e);
+                    }
+                    if settings.hair_style != HairStyle::None {
+                        let cap_mesh =
+                            meshes.add(Sphere::new(mesh_radius * 1.03).mesh().ico(4).unwrap());
+                        let cap = commands
+                            .spawn((
+                                Mesh3d(cap_mesh),
+                                MeshMaterial3d(hair_mat.clone()),
+                                Transform::from_translation(Vec3::new(
+                                    0.0,
+                                    mesh_radius * 0.25,
+                                    -mesh_radius * 0.1,
+                                )),
+                                CharacterVisualEntity,
+                                CharacterModelPart,
+                            ))
+                            .id();
+                        commands.entity(outer_node_entity).add_child(cap);
                     }
                 }
             }
         }
     }
 
-    // Spawn Outer Skin Cylinder Limbs
+    // Outer Cylinder Limbs
     let cylinder_mesh = meshes.add(Cylinder::new(1.0, 1.0));
-    let skin_connections = vec![
-        ("Pelvis", "Spine", pants_mat.clone(), 0.18),
-        ("Spine", "Chest", shirt_mat.clone(), 0.18),
-        ("Chest", "Head", skin_mat.clone(), 0.12),
-        ("Chest", "L_Shoulder", shirt_mat.clone(), 0.12),
-        ("L_Shoulder", "L_Elbow", skin_mat.clone(), 0.08),
-        ("Chest", "R_Shoulder", shirt_mat.clone(), 0.12),
-        ("R_Shoulder", "R_Elbow", skin_mat.clone(), 0.08),
-        ("Pelvis", "L_Hip", pants_mat.clone(), 0.14),
-        ("L_Hip", "L_Knee", pants_mat.clone(), 0.10),
-        ("L_Knee", "L_Foot", skin_mat.clone(), 0.08),
-        ("Pelvis", "R_Hip", pants_mat.clone(), 0.14),
-        ("R_Hip", "R_Knee", pants_mat.clone(), 0.10),
-        ("R_Knee", "R_Foot", skin_mat.clone(), 0.08),
-    ];
+    let skin_connections = match settings.outfit_style {
+        OutfitStyle::SciFiSuit => vec![
+            ("Pelvis", "Spine", scifi_suit_mat.clone(), 0.18),
+            ("Spine", "Chest", scifi_suit_mat.clone(), 0.18),
+            ("Chest", "Head", scifi_suit_mat.clone(), 0.12),
+            ("Chest", "L_Shoulder", scifi_suit_mat.clone(), 0.12),
+            ("L_Shoulder", "L_Elbow", scifi_suit_mat.clone(), 0.08),
+            ("Chest", "R_Shoulder", scifi_suit_mat.clone(), 0.12),
+            ("R_Shoulder", "R_Elbow", scifi_suit_mat.clone(), 0.08),
+            ("Pelvis", "L_Hip", scifi_suit_mat.clone(), 0.14),
+            ("L_Hip", "L_Knee", scifi_suit_mat.clone(), 0.10),
+            ("L_Knee", "L_Foot", scifi_suit_mat.clone(), 0.08),
+            ("Pelvis", "R_Hip", scifi_suit_mat.clone(), 0.14),
+            ("R_Hip", "R_Knee", scifi_suit_mat.clone(), 0.10),
+            ("R_Knee", "R_Foot", scifi_suit_mat.clone(), 0.08),
+        ],
+        OutfitStyle::TacticalArmor => vec![
+            ("Pelvis", "Spine", tac_vest_mat.clone(), 0.18),
+            ("Spine", "Chest", tac_vest_mat.clone(), 0.18),
+            ("Chest", "Head", tac_camo_mat.clone(), 0.12),
+            ("Chest", "L_Shoulder", tac_camo_mat.clone(), 0.12),
+            ("L_Shoulder", "L_Elbow", tac_camo_mat.clone(), 0.08),
+            ("Chest", "R_Shoulder", tac_camo_mat.clone(), 0.12),
+            ("R_Shoulder", "R_Elbow", tac_camo_mat.clone(), 0.08),
+            ("Pelvis", "L_Hip", tac_camo_mat.clone(), 0.14),
+            ("L_Hip", "L_Knee", tac_camo_mat.clone(), 0.10),
+            ("L_Knee", "L_Foot", tac_camo_mat.clone(), 0.08),
+            ("Pelvis", "R_Hip", tac_camo_mat.clone(), 0.14),
+            ("R_Hip", "R_Knee", tac_camo_mat.clone(), 0.10),
+            ("R_Knee", "R_Foot", tac_camo_mat.clone(), 0.08),
+        ],
+        OutfitStyle::StylizedHero => vec![
+            ("Pelvis", "Spine", hero_pants_mat.clone(), 0.18),
+            ("Spine", "Chest", hero_jacket_mat.clone(), 0.18),
+            ("Chest", "Head", skin_mat.clone(), 0.12),
+            ("Chest", "L_Shoulder", hero_jacket_mat.clone(), 0.12),
+            ("L_Shoulder", "L_Elbow", hero_jacket_mat.clone(), 0.08),
+            ("Chest", "R_Shoulder", hero_jacket_mat.clone(), 0.12),
+            ("R_Shoulder", "R_Elbow", hero_jacket_mat.clone(), 0.08),
+            ("Pelvis", "L_Hip", hero_pants_mat.clone(), 0.14),
+            ("L_Hip", "L_Knee", hero_pants_mat.clone(), 0.10),
+            ("L_Knee", "L_Foot", hero_pants_mat.clone(), 0.08),
+            ("Pelvis", "R_Hip", hero_pants_mat.clone(), 0.14),
+            ("R_Hip", "R_Knee", hero_pants_mat.clone(), 0.10),
+            ("R_Knee", "R_Foot", hero_pants_mat.clone(), 0.08),
+        ],
+        OutfitStyle::SkeletonExoFrame => vec![
+            ("Pelvis", "Spine", exo_glass_mat.clone(), 0.18),
+            ("Spine", "Chest", exo_glass_mat.clone(), 0.18),
+            ("Chest", "Head", exo_glass_mat.clone(), 0.12),
+            ("Chest", "L_Shoulder", exo_glass_mat.clone(), 0.12),
+            ("L_Shoulder", "L_Elbow", exo_glass_mat.clone(), 0.08),
+            ("Chest", "R_Shoulder", exo_glass_mat.clone(), 0.12),
+            ("R_Shoulder", "R_Elbow", exo_glass_mat.clone(), 0.08),
+            ("Pelvis", "L_Hip", exo_glass_mat.clone(), 0.14),
+            ("L_Hip", "L_Knee", exo_glass_mat.clone(), 0.10),
+            ("L_Knee", "L_Foot", exo_glass_mat.clone(), 0.08),
+            ("Pelvis", "R_Hip", exo_glass_mat.clone(), 0.14),
+            ("R_Hip", "R_Knee", exo_glass_mat.clone(), 0.10),
+            ("R_Knee", "R_Foot", exo_glass_mat.clone(), 0.08),
+        ],
+        OutfitStyle::ClassicMannequin => vec![
+            ("Pelvis", "Spine", pants_mat.clone(), 0.18),
+            ("Spine", "Chest", shirt_mat.clone(), 0.18),
+            ("Chest", "Head", skin_mat.clone(), 0.12),
+            ("Chest", "L_Shoulder", shirt_mat.clone(), 0.12),
+            ("L_Shoulder", "L_Elbow", skin_mat.clone(), 0.08),
+            ("Chest", "R_Shoulder", shirt_mat.clone(), 0.12),
+            ("R_Shoulder", "R_Elbow", skin_mat.clone(), 0.08),
+            ("Pelvis", "L_Hip", pants_mat.clone(), 0.14),
+            ("L_Hip", "L_Knee", pants_mat.clone(), 0.10),
+            ("L_Knee", "L_Foot", skin_mat.clone(), 0.08),
+            ("Pelvis", "R_Hip", pants_mat.clone(), 0.14),
+            ("R_Hip", "R_Knee", pants_mat.clone(), 0.10),
+            ("R_Knee", "R_Foot", skin_mat.clone(), 0.08),
+        ],
+    };
 
     for (na, nb, mat, rad) in skin_connections {
         commands.spawn((
             Mesh3d(cylinder_mesh.clone()),
             MeshMaterial3d(mat),
-            Transform::default(), // Synced dynamically by character_mesh_sync_system
+            Transform::default(),
             LimbVisual {
                 node_a: na.to_string(),
                 node_b: nb.to_string(),
@@ -1070,7 +1572,7 @@ fn spawn_character_visuals(
         ));
     }
 
-    // Spawn Inner Skeletal Limbs (Bones, Muscles & Tendons)
+    // Inner Skeletal Limbs
     let skeletal_limb = build_skeletal_limb_mesh();
     let limb_connections = vec![
         ("Pelvis", "Spine", 0.16),
@@ -1303,6 +1805,100 @@ fn character_designer_ui(
             ui.horizontal(|ui| {
                 ui.label("Name:");
                 ui.text_edit_singleline(&mut settings.custom_name);
+            });
+
+            ui.add_space(5.0);
+            ui.heading("👕 Outfit & Armor Style");
+            ui.separator();
+            ui.horizontal(|ui| {
+                if ui
+                    .selectable_label(
+                        settings.outfit_style == OutfitStyle::SciFiSuit,
+                        "🚀 Sci-Fi Suit",
+                    )
+                    .clicked()
+                {
+                    settings.outfit_style = OutfitStyle::SciFiSuit;
+                    trigger_rebuild(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        &settings,
+                        &mut physics,
+                        &model_part_query,
+                    );
+                }
+                if ui
+                    .selectable_label(
+                        settings.outfit_style == OutfitStyle::TacticalArmor,
+                        "🛡️ Tactical",
+                    )
+                    .clicked()
+                {
+                    settings.outfit_style = OutfitStyle::TacticalArmor;
+                    trigger_rebuild(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        &settings,
+                        &mut physics,
+                        &model_part_query,
+                    );
+                }
+            });
+
+            ui.horizontal(|ui| {
+                if ui
+                    .selectable_label(
+                        settings.outfit_style == OutfitStyle::StylizedHero,
+                        "🦸 Stylized Hero",
+                    )
+                    .clicked()
+                {
+                    settings.outfit_style = OutfitStyle::StylizedHero;
+                    trigger_rebuild(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        &settings,
+                        &mut physics,
+                        &model_part_query,
+                    );
+                }
+                if ui
+                    .selectable_label(
+                        settings.outfit_style == OutfitStyle::SkeletonExoFrame,
+                        "💀 Exo-Skeleton",
+                    )
+                    .clicked()
+                {
+                    settings.outfit_style = OutfitStyle::SkeletonExoFrame;
+                    trigger_rebuild(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        &settings,
+                        &mut physics,
+                        &model_part_query,
+                    );
+                }
+                if ui
+                    .selectable_label(
+                        settings.outfit_style == OutfitStyle::ClassicMannequin,
+                        "🪵 Classic",
+                    )
+                    .clicked()
+                {
+                    settings.outfit_style = OutfitStyle::ClassicMannequin;
+                    trigger_rebuild(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        &settings,
+                        &mut physics,
+                        &model_part_query,
+                    );
+                }
             });
 
             ui.add_space(5.0);
@@ -1608,7 +2204,9 @@ fn trigger_rebuild(
     model_part_query: &Query<Entity, With<CharacterModelPart>>,
 ) {
     for entity in model_part_query.iter() {
-        commands.entity(entity).despawn();
+        if let Ok(mut cmd) = commands.get_entity(entity) {
+            cmd.despawn();
+        }
     }
 
     initialize_ragdoll_skeleton(settings, physics);
