@@ -3443,7 +3443,7 @@ fn player_movement_and_ragdoll_system(
                     }
 
                     params.commands.spawn((
-                        AudioPlayer::new(params.asset_server.load("pistol_shot.wav")),
+                        AudioPlayer::new(params.asset_server.load("pistol_shoot.wav")),
                         PlaybackSettings::DESPAWN,
                     ));
                     inventory_log("⚡ Starfighter Dual Plasma Cannons Fired!");
@@ -8625,14 +8625,15 @@ pub fn starship_visual_sync_system(
                 ship_transform.translation.z,
                 &map,
             );
-            ship_transform.rotation = Quat::IDENTITY;
+            ship_transform.rotation = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
             ship_transform.translation.y = ground_y + 1.0;
         }
 
         if player.state == PlayerState::PilotingStarship {
             ship_transform.translation = player.position;
 
-            let yaw_rot = Quat::from_rotation_y(-player.rotation_yaw);
+            let yaw_rot =
+                Quat::from_rotation_y(std::f32::consts::FRAC_PI_2 - player.rotation_yaw);
             let pitch_angle = if keyboard_input.pressed(KeyCode::Space) {
                 0.18
             } else if keyboard_input.pressed(KeyCode::ControlLeft)
