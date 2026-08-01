@@ -4787,7 +4787,7 @@ fn play_mode_hud_ui(
             ui.separator();
 
             ui.label(egui::RichText::new("Controls:").strong().underline());
-            ui.label("• W, A, S, D to move / strafe\n• Shift to Run / Turbo Swim Sprint\n• Space to Jump, Swim Up, or Climb Bridge Deck\n• Ctrl or C to Dive Down (Water) or Crouch\n• Mouse to look and aim\n• Left-Click to shoot / swing melee\n• Press 1..=5 to switch weapon slot\n• Press [R] to reload current gun\n• Press [F5] to Quick Save / [F9] to Quick Load\n• Press [H] to toggle Tactical Headlamp ON/OFF\n• Press [Q] to use Health Pack (+35 HP)\n• Press [X] to dismantle Trilobite defender\n• Press [B] to activate Surface Recall Beacon\n• Press [G] to collapse into ragdoll!");
+            ui.label("• W, A, S, D to move / strafe\n• Shift to Run / Turbo Swim Sprint\n• Space to Jump, Swim Up, or Climb Bridge Deck\n• Ctrl or C to Dive Down (Water) or Crouch\n• Mouse to look and aim\n• Left-Click to shoot / swing melee\n• Press 1..=5 to switch weapon slot\n• Press [R] to reload current gun\n• Press [F5] to Quick Save / [F9] to Quick Load\n• Press [T] or [F] to Feed Treats & Tame Wild Fox (Friendship ❤️)\n• Press [X] to Deploy / Dismantle Robot Trilobite Defender\n• Press [H] to toggle Tactical Headlamp ON/OFF\n• Press [Q] to use Health Pack (+35 HP)\n• Press [B] to Toggle Building Placement Mode\n• Press [G] to collapse into ragdoll!");
 
             ui.add_space(15.0);
             if ui.add(egui::Button::new("🚪 Exit to Launcher Menu").fill(egui::Color32::from_rgb(160, 40, 40))).clicked() {
