@@ -5830,7 +5830,7 @@ fn play_mode_hud_ui(
             }
         } else if creature.creature_type == creatures::CreatureType::RobotTrilobite
             && creature.state != creatures::CreatureState::Dead
-            && player.position.distance(c_transform.translation) < 4.5
+            && player.position.distance(c_transform.translation) < 2.5
         {
             near_trilobite_entity = Some(c_entity);
         }
@@ -5857,17 +5857,21 @@ fn play_mode_hud_ui(
 
     if let Some(trilobite_entity) = near_trilobite_entity {
         egui::Area::new(egui::Id::new("trilobite_salvage_prompt"))
-                .anchor(egui::Align2::CENTER_BOTTOM, egui::Vec2::new(0.0, -75.0))
-                .show(ctx, |ui| {
-                    ui.label(
-                        egui::RichText::new("🤖 Press [X] to Dismantle & Recycle Defender Trilobite (+1 Robot Parts, +1 Steel)")
-                            .size(18.0)
-                            .strong()
-                            .color(egui::Color32::from_rgb(140, 220, 255)),
-                    );
-                });
+            .anchor(egui::Align2::CENTER_BOTTOM, egui::Vec2::new(0.0, -75.0))
+            .show(ctx, |ui| {
+                ui.label(
+                    egui::RichText::new(
+                        "🤖 Press [Shift + X] to Dismantle & Recycle Defender Trilobite (+1 Robot Parts, +1 Steel)",
+                    )
+                    .size(18.0)
+                    .strong()
+                    .color(egui::Color32::from_rgb(140, 220, 255)),
+                );
+            });
 
-        if keyboard.just_pressed(KeyCode::KeyX) {
+        if (keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight))
+            && keyboard.just_pressed(KeyCode::KeyX)
+        {
             commands.entity(trilobite_entity).despawn();
             inventory.robot_parts += 1;
             inventory.steel += 1;

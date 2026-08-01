@@ -348,7 +348,10 @@ pub fn spawn_defender_trilobite(
     asset_server: Res<AssetServer>,
     player_query: Query<&PlayModePlayer>,
 ) {
-    if !keys.just_pressed(KeyCode::KeyX) {
+    if !keys.just_pressed(KeyCode::KeyX)
+        || keys.pressed(KeyCode::ShiftLeft)
+        || keys.pressed(KeyCode::ShiftRight)
+    {
         return;
     }
     let Ok(player) = player_query.single() else {
