@@ -84,6 +84,9 @@ impl Plugin for PlayModePlugin {
                     creatures::drive_trilobite_animations,
                     creatures::spawn_defender_trilobite,
                     creatures::trilobite_combat_system,
+                    creatures::tamed_fox_combat_system,
+                    creatures::fox_taming_interaction_system,
+                    creatures::spawn_saved_tamed_foxes,
                     creatures::creature_respawn_system,
                     add_physics_to_wall_colliders,
                     play_mode_mouse_grab_system,
@@ -236,6 +239,8 @@ pub struct SaveData {
     pub has_sword: bool,
     pub has_leather_armor: bool,
     pub has_recall_beacon: bool,
+    #[serde(default)]
+    pub tamed_fox_count: u32,
     pub player_pos: [f32; 3],
     pub health: f32,
     pub max_health: f32,
@@ -292,6 +297,7 @@ pub fn save_progress(
         has_sword: inventory.has_sword,
         has_leather_armor: inventory.has_leather_armor,
         has_recall_beacon: inventory.has_recall_beacon,
+        tamed_fox_count: inventory.tamed_fox_count,
         player_pos: [player.position.x, player.position.y, player.position.z],
         health: player.health,
         max_health: player.max_health,
@@ -348,6 +354,7 @@ pub fn load_progress(
     inventory.ship_repair_robot_parts = data.ship_repair_robot_parts;
     inventory.ship_repair_alien_tech = data.ship_repair_alien_tech;
     inventory.starship_repaired = data.starship_repaired;
+    inventory.tamed_fox_count = data.tamed_fox_count;
     inventory.equipped_axe = data.equipped_axe;
     inventory.equipped_armor = data.equipped_armor;
     inventory.has_flight_suit = data.has_flight_suit;
@@ -444,6 +451,7 @@ pub struct PlayerInventory {
     pub has_recall_beacon: bool,
     pub shield_timer: f32,
     pub show_alien_store: bool,
+    pub tamed_fox_count: u32,
     pub loot_log: Vec<String>,
 }
 

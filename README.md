@@ -5,11 +5,16 @@
 [![Physics](https://img.shields.io/badge/Physics-Avian3D_0.7-green.svg)](https://github.com/JRefent/avian)
 [![GUI](https://img.shields.io/badge/GUI-bevy__egui_0.41-purple.svg)](https://github.com/mvlabat/bevy_egui)
 
-**Tempest Rising** is an open-world 3D sci-fi survival, exploration, and building action game built with **Rust** and the **Bevy Engine**. Explore an alien planet featuring binary suns, black hole gravitational lensing, deep subterranean caves, procedural ragdoll physics, dynamic water simulation, customizable armory, resource harvesting, building construction, and starship restoration.
+**Tempest Rising** is an open-world 3D sci-fi survival, exploration, and building action game built with **Rust** and the **Bevy Engine**. Explore an alien planet featuring binary suns, black hole gravitational lensing, deep subterranean caves, procedural ragdoll physics, dynamic water simulation, customizable armory, resource harvesting, building construction, companion animal domestication, and starship restoration.
 
 ---
 
 ## ✨ Features & Highlights
+
+### 🦊 Fox Domestication & Companion Defenders
+* **Individual Animal Friendship**: Approach wild foxes and offer treats (`T` / `F` key) to build friendship step-by-step (1/3 ❤️, 2/3 ❤️, 3/3 ❤️).
+* **Named Loyal Pets**: Domesticated foxes receive unique individual names (*Sparky, Ember, Jasper, Rusty, Pippin...*) and wear glowing golden companion collars!
+* **Active Combat Support**: Your tamed companion foxes follow you faithfully and leap into battle to pounce on hostile creatures (*Monsters, Triangaroos, Polypugs*) to defend you!
 
 ### 🚀 Exploration & Physics Engine
 * **Seamless Camera Views**: Switch dynamically between **Third-Person**, **First-Person**, and **Orbit/Spectator** camera modes (`V` key).
@@ -31,11 +36,11 @@
 * **Resource Harvesting**: Chop timber, mine stone, copper, iron, silver, gold, platinum, steel, granite, and crystal shards. Collect creature pelts and alien tech.
 * **Modular Building Placement**: Construct brick walls, timber palisades, cyber metal walls, watchtowers, staircases, and ramps (`B` key building mode).
 * **High-Tech Cyber Flight Suit**: Craft advanced flight armor to unlock 3D flight controls (`F` key) and high damage resistance.
-* **Crashed Starship Restoration**: Collect key repair subsystems to restore your downed starship and survive the planet.
+* **Crashed Starship Restoration**: Collect key repair subsystems to restore your downed starship and pilot it into orbit.
 * **Alien Barter Station**: Trade rare gold and harvested materials with alien merchants for high-tech components.
 
 ### 💾 Progress Saving & Customization
-* **Persistent Progress System**: Quick Save (`F5`) and Quick Load (`F9`) hotkeys + HUD buttons saving inventory, location, equipment, ammo, and character outfits to `save_game.json`.
+* **Persistent Progress System**: Quick Save (`F5`) and Quick Load (`F9`) hotkeys + HUD buttons saving inventory, tamed companions, location, equipment, ammo, and character outfits to `save_game.json`.
 * **3D Character Designer**: Customize gender, height, weight, hair styles, colors, and outfit styles (*Sci-Fi Suit, Tactical Armor, Stylized Hero, Skeleton Exo-Frame, Classic Mannequin*).
 * **Integrated Editors**: Includes a Map Editor and Built-in Sprite Editor for texture manipulation.
 
@@ -56,10 +61,11 @@
 | **V** | Toggle View Mode (*Third-Person, First-Person, Orbit*) |
 | **F5** | **Quick Save Progress** |
 | **F9** | **Quick Load Progress** |
+| **T / F** | **Offer Treats to Wild Fox (Build Friendship / Tame Companion)** |
+| **X** | Deploy / Dismantle Robot Trilobite Defender |
 | **F** | Toggle High-Tech Flight Mode (*When Cyber Suit Equipped*) |
 | **H** | Toggle Tactical Headlamp |
 | **Q** | Use Health Pack (+35 HP) |
-| **X** | Deploy / Dismantle Robot Trilobite Defender |
 | **B** | Toggle Modular Building Placement Mode |
 | **G** | Collapse into Ragdoll Physics |
 

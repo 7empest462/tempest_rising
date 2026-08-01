@@ -65,6 +65,14 @@ pub struct AggroState {
     pub is_provoked: bool,
 }
 
+/// Tracks individual fox domestication, friendship level, and custom companion name.
+#[derive(Component)]
+pub struct TamedFox {
+    pub name: String,
+    pub friendship: u32, // 1..=3 (3 = Fully Domesticated Companion)
+    pub pounce_cooldown: f32,
+}
+
 // ──────────────────────────────────────────────
 // Animation resources for GLTF-animated creatures
 // ──────────────────────────────────────────────
@@ -340,7 +348,7 @@ pub fn spawn_defender_trilobite(
     asset_server: Res<AssetServer>,
     player_query: Query<&PlayModePlayer>,
 ) {
-    if !keys.just_pressed(KeyCode::KeyT) {
+    if !keys.just_pressed(KeyCode::KeyX) {
         return;
     }
     let Ok(player) = player_query.single() else {
@@ -1078,6 +1086,7 @@ pub fn creature_ai_system(
         &mut Transform,
         Option<&mut AggroState>,
         Option<&mut avian3d::prelude::Position>,
+        Option<&TamedFox>,
     )>,
     collider_query: Query<
         (Entity, &crate::play_mode::WallCollider, &Transform),
@@ -1097,17 +1106,17 @@ pub fn creature_ai_system(
     // without borrowing creature_query a second time during the mutable iteration.
     let hostile_positions: Vec<(Entity, Vec3)> = creature_query
         .iter()
-        .filter(|(_, c, _, _, _)| {
+        .filter(|(_, c, _, _, _, _)| {
             c.state != CreatureState::Dead
                 && matches!(
                     c.creature_type,
                     CreatureType::Monster | CreatureType::Triangaroo | CreatureType::Polypug
                 )
         })
-        .map(|(e, _, t, _, _)| (e, t.translation))
+        .map(|(e, _, t, _, _, _)| (e, t.translation))
         .collect();
 
-    for (entity, mut creature, mut transform, mut aggro_opt, phys_pos_opt) in
+    for (entity, mut creature, mut transform, mut aggro_opt, phys_pos_opt, tamed_opt) in
         creature_query.iter_mut()
     {
         if creature.state == CreatureState::Dead {
@@ -1311,42 +1320,75 @@ pub fn creature_ai_system(
                     creature.position.y = ground_y;
                 }
 
-                creature.wander_timer -= dt;
+                let is_tamed = tamed_opt.map(|t| t.friendship >= 3).unwrap_or(false);
 
-                // Foxes are more skittish and curious
-                if creature.wander_timer <= 0.0 {
-                    creature.wander_timer = 0.8 + rand::random::<f32>() * 2.2; // Foxes change direction more often
+                if is_tamed {
+                    // Tamed Companion Fox AI: defend player against hostiles or follow close by
+                    let nearest_hostile = hostile_positions
+                        .iter()
+                        .map(|(_, pos)| (*pos, creature.position.distance(*pos)))
+                        .filter(|(pos, dist)| *dist < 16.0 || pos.distance(player_pos) < 16.0)
+                        .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
-                    let should_run = rand::random::<f32>() < 0.35; // 35% chance to sprint
-
-                    creature.state = if should_run {
-                        CreatureState::Wandering // or add a Running state later
+                    if let Some((target_pos, _dist)) = nearest_hostile {
+                        let dir = (target_pos - creature.position).normalize_or_zero();
+                        creature.velocity = dir * 5.8;
+                        creature.yaw = dir.z.atan2(dir.x);
+                        creature.state = CreatureState::Attacking;
                     } else {
-                        CreatureState::Idle
-                    };
-
-                    creature.yaw = rand::random::<f32>() * std::f32::consts::TAU;
-                }
-
-                if creature.state == CreatureState::Wandering {
-                    let dir = Vec3::new(creature.yaw.cos(), 0.0, creature.yaw.sin());
-                    let speed = if creature.wander_timer > 1.5 {
-                        3.2
-                    } else {
-                        1.8
-                    }; // occasional bursts of speed
-                    creature.velocity = dir * speed;
+                        // Follow player
+                        let dist_to_player = creature.position.distance(player_pos);
+                        if dist_to_player > 3.2 {
+                            let dir = (player_pos - creature.position).normalize_or_zero();
+                            creature.velocity = dir * 3.8;
+                            creature.yaw = dir.z.atan2(dir.x);
+                            creature.state = CreatureState::Wandering;
+                        } else {
+                            creature.velocity = Vec3::ZERO;
+                            creature.state = CreatureState::Idle;
+                        }
+                    }
+                    let vel = creature.velocity;
+                    creature.position += vel * dt;
+                    if creature.state == CreatureState::Idle {
+                        creature.position.y += (time.elapsed_secs() * 8.0).sin() * 0.03;
+                    }
                 } else {
-                    creature.velocity = Vec3::ZERO;
-                }
+                    creature.wander_timer -= dt;
 
-                // Apply movement
-                let vel = creature.velocity;
-                creature.position += vel * dt;
+                    // Wild Foxes are skittish and curious
+                    if creature.wander_timer <= 0.0 {
+                        creature.wander_timer = 0.8 + rand::random::<f32>() * 2.2;
 
-                // Gentle bobbing when idle (fox-like curiosity)
-                if creature.state == CreatureState::Idle {
-                    creature.position.y += (time.elapsed_secs() * 6.0).sin() * 0.025;
+                        let should_run = rand::random::<f32>() < 0.35;
+
+                        creature.state = if should_run {
+                            CreatureState::Wandering
+                        } else {
+                            CreatureState::Idle
+                        };
+
+                        creature.yaw = rand::random::<f32>() * std::f32::consts::TAU;
+                    }
+
+                    if creature.state == CreatureState::Wandering {
+                        let dir = Vec3::new(creature.yaw.cos(), 0.0, creature.yaw.sin());
+                        let speed = if creature.wander_timer > 1.5 {
+                            3.2
+                        } else {
+                            1.8
+                        };
+                        creature.velocity = dir * speed;
+                    } else {
+                        creature.velocity = Vec3::ZERO;
+                    }
+
+                    let vel = creature.velocity;
+                    creature.position += vel * dt;
+
+                    if creature.state == CreatureState::Idle {
+                        creature.position.y += (time.elapsed_secs() * 6.0).sin() * 0.025;
+                    }
                 }
             }
             CreatureType::Bird => {
@@ -1775,6 +1817,317 @@ pub fn trilobite_combat_system(mut creature_query: Query<(Entity, &mut PlayCreat
             if let Ok((_, mut trilo, _)) = creature_query.get_mut(trilo_entity) {
                 trilo.attack_cooldown = 0.8;
             }
+        }
+    }
+}
+
+// ──────────────────────────────────────────────
+// Tamed Companion Fox Combat & Taming Systems
+// ──────────────────────────────────────────────
+
+/// Companion Fox pounce attack system against hostile creatures
+#[allow(clippy::type_complexity)]
+pub fn tamed_fox_combat_system(
+    mut creature_query: Query<(
+        Entity,
+        &mut PlayCreature,
+        &Transform,
+        Option<&mut TamedFox>,
+    )>,
+) {
+    let mut pounces: Vec<(Entity, Vec3, String)> = Vec::new();
+    for (entity, creature, transform, tamed_opt) in creature_query.iter() {
+        if creature.creature_type == CreatureType::Fox
+            && creature.state == CreatureState::Attacking
+            && if let Some(t) = &tamed_opt {
+                t.pounce_cooldown <= 0.0 && t.friendship >= 3
+            } else {
+                false
+            }
+        {
+            let name = tamed_opt
+                .as_ref()
+                .map(|t| t.name.clone())
+                .unwrap_or_else(|| "Fox".to_string());
+            pounces.push((entity, transform.translation, name));
+        }
+    }
+
+    for (fox_entity, fox_pos, fox_name) in pounces {
+        let mut best_target: Option<(Entity, f32)> = None;
+        for (other_entity, other_creature, _, _) in creature_query.iter() {
+            if other_entity == fox_entity || other_creature.state == CreatureState::Dead {
+                continue;
+            }
+            match other_creature.creature_type {
+                CreatureType::Monster | CreatureType::Triangaroo | CreatureType::Polypug => {}
+                _ => continue,
+            }
+            let dist = fox_pos.distance(other_creature.position);
+            if dist < 2.8 && (best_target.is_none() || dist < best_target.unwrap().1) {
+                best_target = Some((other_entity, dist));
+            }
+        }
+
+        if let Some((target_entity, _)) = best_target {
+            if let Ok((_, mut target, _, _)) = creature_query.get_mut(target_entity) {
+                target.health = (target.health - 16.0).max(0.0);
+                let kb_dir = (target.position - fox_pos).normalize_or_zero();
+                target.velocity += kb_dir * 1.8;
+                if target.health <= 0.0 {
+                    target.state = CreatureState::Dead;
+                    target.death_timer = 0.0;
+                    crate::play_mode::inventory_log(&format!(
+                        "🦊 Your loyal companion Fox '{}' defeated a hostile creature!",
+                        fox_name
+                    ));
+                } else {
+                    crate::play_mode::inventory_log(&format!(
+                        "🦊 Your companion Fox '{}' pounced and bit a hostile for 16 damage!",
+                        fox_name
+                    ));
+                }
+            }
+            if let Ok((_, _, _, Some(mut tamed))) = creature_query.get_mut(fox_entity) {
+                tamed.pounce_cooldown = 1.0;
+            }
+        }
+    }
+
+    // Tick pounce cooldowns
+    for (_, _, _, tamed_opt) in creature_query.iter_mut() {
+        if let Some(mut tamed) = tamed_opt {
+            if tamed.pounce_cooldown > 0.0 {
+                tamed.pounce_cooldown -= 0.016;
+            }
+        }
+    }
+}
+
+/// Allows player to feed wild foxes treats with [KeyT] to gain friendship and domesticate them into companions!
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub fn fox_taming_interaction_system(
+    mut commands: Commands,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    player_query: Query<&crate::play_mode::PlayModePlayer>,
+    mut creature_query: Query<(Entity, &mut PlayCreature, &Transform, Option<&mut TamedFox>)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut inventory: ResMut<crate::play_mode::PlayerInventory>,
+) {
+    if keyboard_input.just_pressed(KeyCode::KeyT) || keyboard_input.just_pressed(KeyCode::KeyF) {
+        let Ok(player) = player_query.single() else {
+            return;
+        };
+
+        // Find nearest wild or in-progress Fox within 4.2 meters
+        let mut nearest_fox: Option<(Entity, f32)> = None;
+        for (entity, creature, transform, _) in creature_query.iter() {
+            if creature.creature_type == CreatureType::Fox && creature.state != CreatureState::Dead {
+                let dist = player.position.distance(transform.translation);
+                if dist < 4.2 && (nearest_fox.is_none() || dist < nearest_fox.unwrap().1) {
+                    nearest_fox = Some((entity, dist));
+                }
+            }
+        }
+
+        if let Some((fox_entity, _)) = nearest_fox {
+            if let Ok((_, _, _transform, tamed_opt)) = creature_query.get(fox_entity) {
+                let current_level = tamed_opt.as_ref().map(|t| t.friendship).unwrap_or(0);
+                let new_level = current_level + 1;
+
+                let names = [
+                    "Sparky", "Ember", "Jasper", "Rusty", "Pippin", "Finley", "Tango", "Cleo",
+                    "Shadow", "Blaze",
+                ];
+                let fox_name = tamed_opt.as_ref().map(|t| t.name.clone()).unwrap_or_else(|| {
+                    names[(rand::random::<u32>() as usize) % names.len()].to_string()
+                });
+
+                if let Ok((_, _, _, Some(mut tamed))) = creature_query.get_mut(fox_entity) {
+                    tamed.friendship = new_level;
+                } else {
+                    commands.entity(fox_entity).insert(TamedFox {
+                        name: fox_name.clone(),
+                        friendship: new_level,
+                        pounce_cooldown: 0.0,
+                    });
+                }
+
+                if new_level == 1 {
+                    crate::play_mode::inventory_log(&format!(
+                        "🦊 Offered wild treats to Fox '{}'! Friendship: 1/3 ❤️ (Press [T] again to feed!)",
+                        fox_name
+                    ));
+                } else if new_level == 2 {
+                    crate::play_mode::inventory_log(&format!(
+                        "🦊 Offered wild treats to Fox '{}'! Friendship: 2/3 ❤️ (Press [T] to complete taming!)",
+                        fox_name
+                    ));
+                } else if new_level >= 3 {
+                    // Fully Tamed & Domesticated Companion!
+                    commands.entity(fox_entity).insert(PlayerDefender);
+                    inventory.tamed_fox_count += 1;
+
+                    // Spawn Golden Companion Collar / Glow Ring on Fox
+                    let collar_mesh = meshes.add(Sphere::new(0.12).mesh().ico(3).unwrap());
+                    let collar_mat = materials.add(StandardMaterial {
+                        base_color: Color::srgb(1.0, 0.85, 0.2),
+                        metallic: 0.9,
+                        emissive: LinearRgba::new(8.0, 6.0, 0.5, 1.0),
+                        unlit: true,
+                        ..default()
+                    });
+                    let collar = commands
+                        .spawn((
+                            Mesh3d(collar_mesh),
+                            MeshMaterial3d(collar_mat),
+                            Transform::from_xyz(0.0, 0.55, 0.2),
+                            crate::play_mode::PlayModeEntity,
+                        ))
+                        .id();
+                    commands.entity(fox_entity).add_child(collar);
+
+                    crate::play_mode::inventory_log(&format!(
+                        "🦊 🎉 You befriended a wild Fox! Named '{}' — it is now your loyal companion defender!",
+                        fox_name
+                    ));
+                }
+            }
+        } else {
+            crate::play_mode::inventory_log(
+                "🦊 Approach a wild Fox (within 4m) and press [T] to offer treats & tame it!",
+            );
+        }
+    }
+}
+
+/// Spawns saved tamed companion foxes when loading game progress
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub fn spawn_saved_tamed_foxes(
+    mut commands: Commands,
+    inventory: Res<crate::play_mode::PlayerInventory>,
+    player_query: Query<&crate::play_mode::PlayModePlayer>,
+    tamed_fox_query: Query<&TamedFox>,
+    asset_server: Res<AssetServer>,
+    fox_animations: Option<Res<FoxAnimations>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    map: Res<TempestMap>,
+) {
+    let current_tamed_count = tamed_fox_query.iter().filter(|t| t.friendship >= 3).count() as u32;
+    if current_tamed_count < inventory.tamed_fox_count {
+        let needed = inventory.tamed_fox_count - current_tamed_count;
+        let Ok(player) = player_query.single() else {
+            return;
+        };
+
+        let names = [
+            "Sparky", "Ember", "Jasper", "Rusty", "Pippin", "Finley", "Tango", "Cleo", "Shadow",
+            "Blaze",
+        ];
+
+        for i in 0..needed {
+            let offset_x = (i as f32 * 2.0 - 1.0) * 1.5;
+            let offset_z = (i as f32 * 1.5 + 1.0) * 1.5;
+            let spawn_x = player.position.x + offset_x;
+            let spawn_z = player.position.z + offset_z;
+            let spawn_y = get_bilinear_height(spawn_x, spawn_z, &map);
+            let spawn_pos = Vec3::new(spawn_x, spawn_y, spawn_z);
+
+            let name =
+                names[(rand::random::<u32>() as usize + i as usize) % names.len()].to_string();
+
+            let fox_entity =
+                if let Some(anims) = &fox_animations {
+                    let graph = anims.graph.clone();
+                    let mut animation_player = AnimationPlayer::default();
+                    animation_player.play(anims.run).repeat();
+
+                    commands
+                        .spawn((
+                            PlayCreature {
+                                creature_type: CreatureType::Fox,
+                                state: CreatureState::Idle,
+                                health: 45.0,
+                                max_health: 45.0,
+                                position: spawn_pos,
+                                velocity: Vec3::ZERO,
+                                yaw: 0.0,
+                                wander_timer: 2.0,
+                                hop_cooldown: 0.0,
+                                is_grounded: true,
+                                death_timer: 0.0,
+                                attack_cooldown: 0.0,
+                            },
+                            TamedFox {
+                                name: name.clone(),
+                                friendship: 3,
+                                pounce_cooldown: 0.0,
+                            },
+                            PlayerDefender,
+                            Transform::from_translation(spawn_pos),
+                            AnimationGraphHandle(graph),
+                            animation_player,
+                            WorldAssetRoot(asset_server.load("Fox.glb#Scene0")),
+                            crate::play_mode::PlayModeEntity,
+                        ))
+                        .id()
+                } else {
+                    let body_mat = materials.add(StandardMaterial {
+                        base_color: Color::srgb(0.9, 0.45, 0.1),
+                        perceptual_roughness: 0.6,
+                        ..default()
+                    });
+                    let body_mesh = meshes.add(Cuboid::new(0.6, 0.45, 0.9));
+                    commands
+                        .spawn((
+                            Mesh3d(body_mesh),
+                            MeshMaterial3d(body_mat),
+                            PlayCreature {
+                                creature_type: CreatureType::Fox,
+                                state: CreatureState::Idle,
+                                health: 45.0,
+                                max_health: 45.0,
+                                position: spawn_pos,
+                                velocity: Vec3::ZERO,
+                                yaw: 0.0,
+                                wander_timer: 2.0,
+                                hop_cooldown: 0.0,
+                                is_grounded: true,
+                                death_timer: 0.0,
+                                attack_cooldown: 0.0,
+                            },
+                            TamedFox {
+                                name: name.clone(),
+                                friendship: 3,
+                                pounce_cooldown: 0.0,
+                            },
+                            PlayerDefender,
+                            Transform::from_translation(spawn_pos),
+                            crate::play_mode::PlayModeEntity,
+                        ))
+                        .id()
+                };
+
+            // Spawn Golden Companion Collar / Glow Ring on Fox
+            let collar_mesh = meshes.add(Sphere::new(0.12).mesh().ico(3).unwrap());
+            let collar_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(1.0, 0.85, 0.2),
+                metallic: 0.9,
+                emissive: LinearRgba::new(8.0, 6.0, 0.5, 1.0),
+                unlit: true,
+                ..default()
+            });
+            let collar = commands
+                .spawn((
+                    Mesh3d(collar_mesh),
+                    MeshMaterial3d(collar_mat),
+                    Transform::from_xyz(0.0, 0.55, 0.2),
+                    crate::play_mode::PlayModeEntity,
+                ))
+                .id();
+            commands.entity(fox_entity).add_child(collar);
         }
     }
 }
