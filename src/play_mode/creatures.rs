@@ -1973,21 +1973,21 @@ pub fn fox_taming_interaction_system(
                     inventory.tamed_fox_count += 1;
 
                     // Spawn Golden Companion Collar / Glow Ring on Fox
-                    let collar_mesh = meshes.add(Torus::new(0.24, 0.05));
-                    let pendant_mesh = meshes.add(Sphere::new(0.09).mesh().ico(3).unwrap());
+                    let collar_mesh = meshes.add(Torus::new(0.12, 0.012));
+                    let pendant_mesh = meshes.add(Sphere::new(0.035).mesh().ico(3).unwrap());
                     let collar_mat = materials.add(StandardMaterial {
-                        base_color: Color::srgb(1.0, 0.88, 0.2),
-                        metallic: 0.95,
-                        emissive: LinearRgba::new(12.0, 9.0, 1.0, 1.0),
-                        unlit: true,
+                        base_color: Color::srgb(0.9, 0.72, 0.15),
+                        metallic: 0.9,
+                        emissive: LinearRgba::new(2.5, 1.8, 0.3, 1.0),
+                        perceptual_roughness: 0.25,
                         ..default()
                     });
                     let collar = commands
                         .spawn((
                             Mesh3d(collar_mesh),
                             MeshMaterial3d(collar_mat.clone()),
-                            Transform::from_xyz(0.0, 0.60, 0.35)
-                                .with_rotation(Quat::from_rotation_x(0.45)),
+                            Transform::from_xyz(0.0, 0.46, 0.28)
+                                .with_rotation(Quat::from_rotation_x(0.68)),
                             crate::play_mode::PlayModeEntity,
                         ))
                         .id();
@@ -1995,7 +1995,7 @@ pub fn fox_taming_interaction_system(
                         .spawn((
                             Mesh3d(pendant_mesh),
                             MeshMaterial3d(collar_mat),
-                            Transform::from_xyz(0.0, -0.22, 0.0),
+                            Transform::from_xyz(0.0, -0.12, 0.0),
                             crate::play_mode::PlayModeEntity,
                         ))
                         .id();
@@ -2125,21 +2125,21 @@ pub fn spawn_saved_tamed_foxes(
                 };
 
             // Spawn Golden Companion Collar / Glow Ring on Fox
-            let collar_mesh = meshes.add(Torus::new(0.24, 0.05));
-            let pendant_mesh = meshes.add(Sphere::new(0.09).mesh().ico(3).unwrap());
+            let collar_mesh = meshes.add(Torus::new(0.12, 0.012));
+            let pendant_mesh = meshes.add(Sphere::new(0.035).mesh().ico(3).unwrap());
             let collar_mat = materials.add(StandardMaterial {
-                base_color: Color::srgb(1.0, 0.88, 0.2),
-                metallic: 0.95,
-                emissive: LinearRgba::new(12.0, 9.0, 1.0, 1.0),
-                unlit: true,
+                base_color: Color::srgb(0.9, 0.72, 0.15),
+                metallic: 0.9,
+                emissive: LinearRgba::new(2.5, 1.8, 0.3, 1.0),
+                perceptual_roughness: 0.25,
                 ..default()
             });
             let collar = commands
                 .spawn((
                     Mesh3d(collar_mesh),
                     MeshMaterial3d(collar_mat.clone()),
-                    Transform::from_xyz(0.0, 0.60, 0.35)
-                        .with_rotation(Quat::from_rotation_x(0.45)),
+                    Transform::from_xyz(0.0, 0.46, 0.28)
+                        .with_rotation(Quat::from_rotation_x(0.68)),
                     crate::play_mode::PlayModeEntity,
                 ))
                 .id();
@@ -2147,7 +2147,7 @@ pub fn spawn_saved_tamed_foxes(
                 .spawn((
                     Mesh3d(pendant_mesh),
                     MeshMaterial3d(collar_mat),
-                    Transform::from_xyz(0.0, -0.22, 0.0),
+                    Transform::from_xyz(0.0, -0.12, 0.0),
                     crate::play_mode::PlayModeEntity,
                 ))
                 .id();
