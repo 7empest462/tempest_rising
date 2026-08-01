@@ -2060,7 +2060,7 @@ pub fn fox_taming_interaction_system(
                         inventory.tamed_fox_count += 1;
 
                         // Spawn collar only once
-                        let collar_mesh = meshes.add(Torus::new(0.115, 0.13));
+                        let collar_mesh = meshes.add(Torus::new(0.155, 0.17));
                         let pendant_mesh = meshes.add(Sphere::new(0.04).mesh().ico(3).unwrap());
                         let collar_mat = materials.add(StandardMaterial {
                             base_color: Color::srgb(0.9, 0.72, 0.15),
@@ -2074,7 +2074,7 @@ pub fn fox_taming_interaction_system(
                                 Mesh3d(collar_mesh),
                                 MeshMaterial3d(collar_mat.clone()),
                                 Transform::from_xyz(0.0, 0.65, 0.38)
-                                    .with_rotation(Quat::from_rotation_x(0.70)),
+                                    .with_rotation(Quat::from_rotation_x(1.05)),
                                 GoldenCollarMarker,
                                 crate::play_mode::PlayModeEntity,
                             ))
@@ -2083,7 +2083,7 @@ pub fn fox_taming_interaction_system(
                             .spawn((
                                 Mesh3d(pendant_mesh),
                                 MeshMaterial3d(collar_mat),
-                                Transform::from_xyz(0.0, -0.06, 0.13),
+                                Transform::from_xyz(0.0, 0.03, 0.16),
                                 crate::play_mode::PlayModeEntity,
                             ))
                             .id();
@@ -2226,7 +2226,7 @@ pub fn spawn_saved_tamed_foxes(
             };
 
             // Spawn Golden Companion Collar / Glow Ring on Fox Upper Neck
-            let collar_mesh = meshes.add(Torus::new(0.115, 0.13));
+            let collar_mesh = meshes.add(Torus::new(0.155, 0.17));
             let pendant_mesh = meshes.add(Sphere::new(0.04).mesh().ico(3).unwrap());
             let collar_mat = materials.add(StandardMaterial {
                 base_color: Color::srgb(0.9, 0.72, 0.15),
@@ -2239,7 +2239,7 @@ pub fn spawn_saved_tamed_foxes(
                 .spawn((
                     Mesh3d(collar_mesh),
                     MeshMaterial3d(collar_mat.clone()),
-                    Transform::from_xyz(0.0, 0.65, 0.38).with_rotation(Quat::from_rotation_x(0.70)),
+                    Transform::from_xyz(0.0, 0.65, 0.38).with_rotation(Quat::from_rotation_x(1.05)),
                     GoldenCollarMarker,
                     crate::play_mode::PlayModeEntity,
                 ))
@@ -2248,7 +2248,7 @@ pub fn spawn_saved_tamed_foxes(
                 .spawn((
                     Mesh3d(pendant_mesh),
                     MeshMaterial3d(collar_mat),
-                    Transform::from_xyz(0.0, -0.06, 0.13),
+                    Transform::from_xyz(0.0, 0.03, 0.16),
                     crate::play_mode::PlayModeEntity,
                 ))
                 .id();
