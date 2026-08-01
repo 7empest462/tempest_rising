@@ -1915,7 +1915,7 @@ pub fn fox_taming_interaction_system(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut inventory: ResMut<crate::play_mode::PlayerInventory>,
 ) {
-    if keyboard_input.just_pressed(KeyCode::KeyT) || keyboard_input.just_pressed(KeyCode::KeyF) {
+    if keyboard_input.just_pressed(KeyCode::KeyT) {
         let Ok(player) = player_query.single() else {
             return;
         };

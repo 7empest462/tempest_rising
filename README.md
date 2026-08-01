@@ -12,7 +12,7 @@
 ## ✨ Features & Highlights
 
 ### 🦊 Fox Domestication & Companion Defenders
-* **Individual Animal Friendship**: Approach wild foxes and offer treats (`T` / `F` key) to build friendship step-by-step (1/3 ❤️, 2/3 ❤️, 3/3 ❤️).
+* **Individual Animal Friendship**: Approach wild foxes and offer treats (`T` key) to build friendship step-by-step (1/3 ❤️, 2/3 ❤️, 3/3 ❤️).
 * **Named Loyal Pets**: Domesticated foxes receive unique individual names (*Sparky, Ember, Jasper, Rusty, Pippin...*) and wear glowing golden companion collars!
 * **Active Combat Support**: Your tamed companion foxes follow you faithfully and leap into battle to pounce on hostile creatures (*Monsters, Triangaroos, Polypugs*) to defend you!
 
@@ -61,9 +61,9 @@
 | **V** | Toggle View Mode (*Third-Person, First-Person, Orbit*) |
 | **F5** | **Quick Save Progress** |
 | **F9** | **Quick Load Progress** |
-| **T / F** | **Offer Treats to Wild Fox (Build Friendship / Tame Companion)** |
-| **X** | Deploy / Dismantle Robot Trilobite Defender |
-| **F** | Toggle High-Tech Flight Mode (*When Cyber Suit Equipped*) |
+| **T** | **Offer Treats to Wild Fox (Build Friendship / Tame Companion)** |
+| **F** | **Toggle High-Tech Flight Mode (When Cyber Suit Equipped)** |
+| **X** | **Deploy / Dismantle Robot Trilobite Defender** |
 | **H** | Toggle Tactical Headlamp |
 | **Q** | Use Health Pack (+35 HP) |
 | **B** | Toggle Modular Building Placement Mode |
