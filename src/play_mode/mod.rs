@@ -3268,15 +3268,18 @@ fn player_movement_and_ragdoll_system(
                 } else if swim_y_dir < 0.0 {
                     player.position.y = (player.position.y - 2.5 * dt).max(ground_y + 0.3);
                 } else {
-                    if player.position.y < water_level {
-                        player.position.y = (player.position.y + 0.8 * dt).min(water_level);
+                    // Float target: chest-level in water (not hips)
+                    let float_target = water_level - 0.45;
+                    if player.position.y < float_target - 0.02 {
+                        // Gently rise toward float target
+                        player.position.y += 0.6 * dt;
+                        player.position.y = player.position.y.min(float_target);
                     } else {
-                        if !player.is_walking {
-                            let bobbing = (time.elapsed_secs() * 2.0).sin() * 0.06;
-                            player.position.y = (water_level - 0.1) + bobbing;
-                        } else {
-                            player.position.y = water_level;
-                        }
+                        // Smooth sinusoidal bobbing around float target
+                        let bobbing = (time.elapsed_secs() * 1.2).sin() * 0.035;
+                        let bob_target = float_target + bobbing;
+                        // Lerp for smooth transitions (no snapping)
+                        player.position.y += (bob_target - player.position.y) * (3.0 * dt).min(1.0);
                     }
                 }
                 player.velocity_y = 0.0;

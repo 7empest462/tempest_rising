@@ -1234,37 +1234,45 @@ pub fn creature_ai_system(
                     CreatureType::Fox => 0.35,
                     _ => 0.4,
                 };
-                let bob = (time.elapsed_secs() * 3.0 + (entity.to_bits() as f32)).sin() * 0.05;
+                let bob = (time.elapsed_secs() * 1.5 + (entity.to_bits() as f32)).sin() * 0.03;
                 let target_y = water_level - float_offset + bob;
-                creature.position.y += (target_y - creature.position.y) * 4.0 * dt;
+                // Smooth lerp toward float target (no snapping)
+                creature.position.y += (target_y - creature.position.y) * (3.0 * dt).min(1.0);
                 creature.velocity.y = 0.0;
                 creature.is_grounded = false;
 
-                // Sample 4 directions to swim back toward land/shallow ground
-                let samples = [
-                    Vec3::new(0.0, 0.0, -1.0),
-                    Vec3::new(0.0, 0.0, 1.0),
-                    Vec3::new(-1.0, 0.0, 0.0),
-                    Vec3::new(1.0, 0.0, 0.0),
-                ];
-                let mut best_dir = Vec3::ZERO;
-                let mut max_h = -999.0;
-                for &d in &samples {
-                    let sample_pos = creature.position + d * 3.0;
-                    let h = get_effective_floor_height(
-                        sample_pos,
-                        get_bilinear_height(sample_pos.x, sample_pos.z, &map),
-                    );
-                    if h > max_h {
-                        max_h = h;
-                        best_dir = d;
+                // Tamed companion foxes skip the swim-to-land AI —
+                // their follow-player logic handles horizontal movement
+                let is_tamed_companion = creature.creature_type == CreatureType::Fox
+                    && tamed_opt.as_ref().map(|t| t.friendship >= 3).unwrap_or(false);
+
+                if !is_tamed_companion {
+                    // Sample 4 directions to swim back toward land/shallow ground
+                    let samples = [
+                        Vec3::new(0.0, 0.0, -1.0),
+                        Vec3::new(0.0, 0.0, 1.0),
+                        Vec3::new(-1.0, 0.0, 0.0),
+                        Vec3::new(1.0, 0.0, 0.0),
+                    ];
+                    let mut best_dir = Vec3::ZERO;
+                    let mut max_h = -999.0;
+                    for &d in &samples {
+                        let sample_pos = creature.position + d * 3.0;
+                        let h = get_effective_floor_height(
+                            sample_pos,
+                            get_bilinear_height(sample_pos.x, sample_pos.z, &map),
+                        );
+                        if h > max_h {
+                            max_h = h;
+                            best_dir = d;
+                        }
                     }
-                }
-                if best_dir != Vec3::ZERO {
-                    creature.yaw = best_dir.z.atan2(best_dir.x);
-                    creature.velocity = best_dir * 1.0;
-                    let vel = creature.velocity;
-                    creature.position += vel * dt;
+                    if best_dir != Vec3::ZERO {
+                        creature.yaw = best_dir.z.atan2(best_dir.x);
+                        creature.velocity = best_dir * 1.0;
+                        let vel = creature.velocity;
+                        creature.position += vel * dt;
+                    }
                 }
 
                 // Dynamic water wave ripple generation
@@ -1427,7 +1435,7 @@ pub fn creature_ai_system(
                     creature.position += vel * dt;
 
                     if creature.state == CreatureState::Idle {
-                        creature.position.y += (time.elapsed_secs() * 8.0).sin() * 0.03;
+                        creature.position.y += (time.elapsed_secs() * 1.5).sin() * 0.015;
                     }
                 } else {
                     // ========== WILD FOX (keep your original code) ==========
