@@ -1799,6 +1799,10 @@ fn character_designer_ui(
     egui::Window::new("Character Designer & Ragdoll Simulator")
         .default_width(320.0)
         .show(ctx, |ui| {
+            egui::ScrollArea::vertical()
+                .max_height(ui.available_height())
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
             ui.heading("Customization Menu");
             ui.separator();
 
@@ -2192,6 +2196,7 @@ fn character_designer_ui(
             if ui.button("🚪 Exit to Launcher").clicked() {
                 next_state.set(AppState::MainMenu);
             }
+            });
         });
 }
 

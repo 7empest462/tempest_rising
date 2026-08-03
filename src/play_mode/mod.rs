@@ -4678,13 +4678,16 @@ fn play_mode_hud_ui(
         let _ = load_progress(&mut inventory, &mut player, &mut char_settings);
     }
 
-    // 1. Play Mode Inventory & Controls Panel
     egui::Window::new("🎮 Play Mode HUD & Inventory")
         .default_width(280.0)
         .anchor(egui::Align2::LEFT_TOP, egui::Vec2::new(10.0, 10.0))
-        .collapsible(false)
-        .resizable(false)
+        .collapsible(true)
+        .resizable(true)
         .show(ctx, |ui| {
+            egui::ScrollArea::vertical()
+                .max_height(560.0)
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
             // Player Health Bar
             ui.horizontal(|ui| {
                 ui.label("❤️ Health:");
@@ -4793,6 +4796,7 @@ fn play_mode_hud_ui(
             if ui.add(egui::Button::new("🚪 Exit to Launcher Menu").fill(egui::Color32::from_rgb(160, 40, 40))).clicked() {
                 next_state.set(AppState::MainMenu);
             }
+            });
         });
 
     // 1.5 Draw center screen crosshair
@@ -5830,7 +5834,7 @@ fn play_mode_hud_ui(
             }
         } else if creature.creature_type == creatures::CreatureType::RobotTrilobite
             && creature.state != creatures::CreatureState::Dead
-            && player.position.distance(c_transform.translation) < 2.5
+            && player.position.distance(c_transform.translation) < 4.5
         {
             near_trilobite_entity = Some(c_entity);
         }
@@ -8644,8 +8648,7 @@ pub fn starship_visual_sync_system(
         if player.state == PlayerState::PilotingStarship {
             ship_transform.translation = player.position;
 
-            let yaw_rot =
-                Quat::from_rotation_y(std::f32::consts::FRAC_PI_2 - player.rotation_yaw);
+            let yaw_rot = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2 - player.rotation_yaw);
             let pitch_angle = if keyboard_input.pressed(KeyCode::Space) {
                 0.18
             } else if keyboard_input.pressed(KeyCode::ControlLeft)
