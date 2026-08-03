@@ -4,6 +4,7 @@ use crate::character_designer::{
 };
 use crate::map_editor::data::TempestMap;
 use crate::map_editor::{SplatmapSettings, WaterImpulseEvent, WaterSettings, generate_water_mesh};
+use crate::play_mode::creatures::{CreatureState, CreatureType, PlayCreature};
 use crate::{ControlScheme, ControlSchemeConfig};
 use bevy::asset::RenderAssetUsages;
 use bevy::ecs::relationship::Relationship;
@@ -16,8 +17,15 @@ use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 pub mod cave;
 pub mod creatures;
 pub mod house;
+pub mod nav;
 pub mod structures;
 
+type CreatureBodyQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static creatures::PlayCreature, &'static Transform),
+    (Without<PlayModePlayer>, Without<PlayModeCamera>),
+>;
 pub struct PlayModePlugin;
 
 impl Plugin for PlayModePlugin {
@@ -2508,6 +2516,7 @@ struct PlayerMovementParams<'w, 's> {
     mouse_input: Res<'w, ButtonInput<MouseButton>>,
     puzzle_state: Res<'w, crate::play_mode::house::HousePuzzleState>,
     ladder_query: Query<'w, 's, &'static GlobalTransform, With<structures::WatchtowerLadder>>,
+    creature_body_query: CreatureBodyQuery<'w, 's>,
 }
 
 fn sync_mansion_global_bounds_system(
@@ -3241,6 +3250,34 @@ fn player_movement_and_ragdoll_system(
                     }
                 }
             }
+
+            // Player-to-creature body collision — player can't walk through creatures
+            let p_body_radius = 0.32 * player.weight;
+            for (creature, creature_transform) in params.creature_body_query.iter() {
+                if creature.state == creatures::CreatureState::Dead {
+                    continue;
+                }
+                let c_pos = creature_transform.translation;
+                let c_radius = match creature.creature_type {
+                    creatures::CreatureType::Monster => 1.2,
+                    creatures::CreatureType::BigBird => 0.8,
+                    creatures::CreatureType::Triangaroo => 0.5,
+                    creatures::CreatureType::Fox => 0.35,
+                    creatures::CreatureType::Alien => 0.6,
+                    creatures::CreatureType::RobotTrilobite => 0.6,
+                    _ => 0.35,
+                };
+                let dx = target_pos.x - c_pos.x;
+                let dz = target_pos.z - c_pos.z;
+                let dist_xz = (dx * dx + dz * dz).sqrt();
+                let min_dist = p_body_radius + c_radius;
+                if dist_xz < min_dist && dist_xz > 0.001 {
+                    let penetration = min_dist - dist_xz;
+                    target_pos.x += (dx / dist_xz) * penetration;
+                    target_pos.z += (dz / dist_xz) * penetration;
+                }
+            }
+
             player.position = target_pos;
 
             let hw = map.width as f32 / 2.0;
@@ -3873,21 +3910,21 @@ fn player_movement_and_ragdoll_system(
                     if let Some(t) = p_axe_swing_timer {
                         let offset = if t < 0.1 {
                             let factor = t / 0.1;
-                            cam_up * (factor * 0.18)
-                                - cam_forward * (factor * 0.15)
-                                - cam_right * (factor * 0.08)
+                            cam_up * (factor * 0.12)
+                                - cam_forward * (factor * 0.08)
+                                - cam_right * (factor * 0.05)
                         } else if t < 0.2 {
                             let factor = (t - 0.1) / 0.1;
                             let wind_up_offset =
-                                cam_up * 0.18 - cam_forward * 0.15 - cam_right * 0.08;
+                                cam_up * 0.12 - cam_forward * 0.08 - cam_right * 0.05;
                             let strike_offset =
-                                -cam_up * 0.25 + cam_forward * 0.35 + cam_right * 0.05;
+                                cam_up * 0.08 + cam_forward * 0.22 + cam_right * 0.02; // closer and more centered
                             let t_smooth = factor * factor;
                             Vec3::lerp(wind_up_offset, strike_offset, t_smooth)
                         } else {
-                            let factor = (t - 0.2) / 0.1;
+                            let factor = (t - 0.2) / 0.12;
                             let strike_offset =
-                                -cam_up * 0.25 + cam_forward * 0.35 + cam_right * 0.05;
+                                cam_up * 0.08 + cam_forward * 0.22 + cam_right * 0.02;
                             let t_smooth = factor * (2.0 - factor);
                             Vec3::lerp(strike_offset, Vec3::ZERO, t_smooth)
                         };
@@ -3953,29 +3990,32 @@ fn player_movement_and_ragdoll_system(
                         - Vec3::Y * 0.25 * p_height;
 
                     if let Some(t) = p_axe_swing_timer {
-                        if t < 0.1 {
-                            let factor = t / 0.1;
+                        if t < 0.10 {
+                            // Wind-up
+                            let factor = t / 0.10;
                             let wind_up_pos = nodes[6].position
-                                + Vec3::Y * 0.25 * p_height
-                                + right * 0.08 * p_weight * sh_w
-                                - forward * 0.15;
+                                + Vec3::Y * 0.20 * p_height
+                                + right * 0.06 * p_weight * sh_w
+                                - forward * 0.12;
                             r_pos = Vec3::lerp(r_pos, wind_up_pos, factor);
-                        } else if t < 0.2 {
-                            let factor = (t - 0.1) / 0.1;
+                        } else if t < 0.20 {
+                            // Strike
+                            let factor = (t - 0.10) / 0.10;
                             let wind_up_pos = nodes[6].position
-                                + Vec3::Y * 0.25 * p_height
-                                + right * 0.08 * p_weight * sh_w
-                                - forward * 0.15;
-                            let strike_pos = nodes[6].position - Vec3::Y * 0.45 * p_height
-                                + right * 0.18 * p_weight * sh_w
-                                + forward * 0.65;
+                                + Vec3::Y * 0.20 * p_height
+                                + right * 0.06 * p_weight * sh_w
+                                - forward * 0.12;
+                            let strike_pos = nodes[6].position - Vec3::Y * 0.22 * p_height
+                                + right * 0.14 * p_weight * sh_w
+                                + forward * 0.58;
                             let t_smooth = factor * factor;
                             r_pos = Vec3::lerp(wind_up_pos, strike_pos, t_smooth);
                         } else {
-                            let factor = (t - 0.2) / 0.1;
-                            let strike_pos = nodes[6].position - Vec3::Y * 0.45 * p_height
-                                + right * 0.18 * p_weight * sh_w
-                                + forward * 0.65;
+                            // Recovery
+                            let factor = ((t - 0.20) / 0.12).min(1.0);
+                            let strike_pos = nodes[6].position - Vec3::Y * 0.22 * p_height
+                                + right * 0.14 * p_weight * sh_w
+                                + forward * 0.58;
                             let target_idle = nodes[6].position
                                 + right * 0.15 * p_weight * sh_w
                                 + forward * (0.2 - walk_swing * 0.5)
@@ -4317,6 +4357,13 @@ fn axe_swing_system(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut inventory: ResMut<PlayerInventory>,
+    asset_server: Res<AssetServer>,
+    mut creature_query: Query<(
+        Entity,
+        &mut PlayCreature,
+        Option<&mut creatures::AggroState>,
+        Option<&creatures::PlayerDefender>,
+    )>,
     builder: Res<crate::procedural_walls::ProceduralWallBuilder>,
     window_query: Query<&CursorOptions, With<Window>>,
 ) {
@@ -4493,11 +4540,118 @@ fn axe_swing_system(
                     }
                 }
             }
+
+            // === Enemy / Creature Hit Detection ===
+            let sword_damage = if inventory.has_sword { 28.0 } else { 14.0 };
+            let hit_radius = if inventory.has_sword { 2.9 } else { 2.3 };
+
+            for (_entity, mut creature, mut aggro_opt, defender_opt) in creature_query.iter_mut() {
+                if creature.state == CreatureState::Dead || defender_opt.is_some() {
+                    continue;
+                }
+
+                let dist = strike_center.distance(creature.position);
+                if dist < hit_radius {
+                    creature.health = (creature.health - sword_damage).max(0.0);
+
+                    let kb_dir = (creature.position - player_pos).normalize_or_zero();
+                    creature.velocity += kb_dir * 4.5 + Vec3::Y * 1.2;
+
+                    if creature.creature_type == CreatureType::Alien
+                        && let Some(ref mut aggro) = aggro_opt
+                    {
+                        aggro.is_provoked = true;
+                        aggro.aggro_timer = 10.0;
+                    }
+
+                    let hit_pos = creature.position + Vec3::Y * 0.9;
+
+                    let spark_color = match creature.creature_type {
+                        CreatureType::Monster => Color::srgb(1.0, 0.25, 0.1),
+                        CreatureType::Alien => Color::srgb(0.6, 0.1, 1.0),
+                        CreatureType::Triangaroo => Color::srgb(1.0, 0.85, 0.2),
+                        CreatureType::Fox => Color::srgb(1.0, 0.55, 0.15),
+                        _ => Color::srgb(0.9, 0.9, 1.0),
+                    };
+
+                    spawn_sparks(
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        hit_pos,
+                        spark_color,
+                    );
+
+                    if creature.health <= 0.0 {
+                        creature.state = CreatureState::Dead;
+                        creature.death_timer = 0.0;
+                        spawn_player_kill_random_drop(
+                            &mut commands,
+                            &asset_server,
+                            creature.position + Vec3::Y * 0.3,
+                        );
+                        crate::play_mode::inventory_log(&format!(
+                            "⚔ You struck down a {:?}!",
+                            creature.creature_type
+                        ));
+                    } else {
+                        crate::play_mode::inventory_log(&format!(
+                            "⚔ Hit {:?} for {:.0} damage!",
+                            creature.creature_type, sword_damage
+                        ));
+                    }
+
+                    break;
+                }
+            }
         }
 
-        if t >= 0.3 {
+        if t >= 0.32 {
             player.axe_swing_timer = None;
         }
+    }
+}
+
+fn spawn_player_kill_random_drop(
+    commands: &mut Commands,
+    asset_server: &AssetServer,
+    drop_pos: Vec3,
+) {
+    let wood_loot = 1 + (rand::random::<f32>() * 3.0) as u32; // 1 to 3
+    let copper_loot = (rand::random::<f32>() * 3.0) as u32; // 0 to 2
+    let iron_loot = (rand::random::<f32>() * 2.0) as u32; // 0 to 1
+
+    if rand::random::<f32>() < 0.4 {
+        commands.spawn((
+            WorldAssetRoot(asset_server.load("Prop_HealthPack.gltf#Scene0")),
+            Transform::from_translation(drop_pos).with_scale(Vec3::splat(1.5)),
+            AmmoDrop {
+                health_heal: 35.0,
+                ..default()
+            },
+            SpinDrop,
+            PlayModeEntity,
+        ));
+        inventory_log("💀 Struck creature down! Health Pack Drop Spawned!");
+    } else {
+        commands.spawn((
+            WorldAssetRoot(asset_server.load("Gun_Sniper_Ammo.gltf#Scene0")),
+            Transform::from_translation(drop_pos).with_scale(Vec3::splat(1.8)),
+            AmmoDrop {
+                ammo_pistol: 12,
+                ammo_revolver: 6,
+                ammo_rifle: 30,
+                ammo_sniper: 5,
+                wood: wood_loot,
+                copper: copper_loot,
+                iron: iron_loot,
+                health_heal: 0.0,
+                ..default()
+            },
+            SpinDrop,
+            PlayModeEntity,
+        ));
+        inventory_log("💀 Struck creature down! Ammo Drop Spawned!");
     }
 }
 
@@ -4666,6 +4820,7 @@ fn play_mode_hud_ui(
     starship_query: Query<(&Transform, &CrashedStarship)>,
     mut building_state: ResMut<structures::BuildingPlacementState>,
     mut char_settings: ResMut<CharacterSettings>,
+    water_settings: Res<WaterSettings>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
@@ -6276,6 +6431,181 @@ fn play_mode_hud_ui(
                 }
             });
     }
+
+    // ====== MINIMAP (Lower-Left Corner) ======
+    let minimap_size = 180.0_f32;
+    egui::Window::new("🗺 Map")
+        .anchor(egui::Align2::LEFT_BOTTOM, egui::Vec2::new(10.0, -10.0))
+        .fixed_size(egui::Vec2::new(minimap_size + 8.0, minimap_size + 24.0))
+        .collapsible(true)
+        .resizable(false)
+        .title_bar(true)
+        .show(ctx, |ui| {
+            let (rect, _response) = ui.allocate_exact_size(
+                egui::Vec2::new(minimap_size, minimap_size),
+                egui::Sense::hover(),
+            );
+            let painter = ui.painter_at(rect);
+
+            // Draw dark background
+            painter.rect_filled(rect, 2.0, egui::Color32::from_rgb(10, 12, 18));
+
+            let map_w = map.width as f32;
+            let map_h = map.height as f32;
+            let water_y = water_settings.height;
+
+            // Downsample terrain to minimap pixels
+            let px_count = minimap_size as usize;
+            let step_x = map_w / px_count as f32;
+            let step_z = map_h / px_count as f32;
+            let px_size = minimap_size / px_count as f32;
+
+            for pz in 0..px_count {
+                for px in 0..px_count {
+                    let map_x = (px as f32 * step_x) as u32;
+                    let map_z = (pz as f32 * step_z) as u32;
+                    let h = map.get_height(map_x.min(map.width - 1), map_z.min(map.height - 1));
+                    let biome = map.get_biome(map_x.min(map.width - 1), map_z.min(map.height - 1));
+
+                    let color = if h < water_y {
+                        // Water: depth-shaded blue
+                        let depth = ((water_y - h) * 8.0).clamp(0.0, 1.0);
+                        egui::Color32::from_rgb(
+                            (15.0 - depth * 10.0) as u8,
+                            (40.0 + depth * 20.0) as u8,
+                            (100.0 + depth * 80.0) as u8,
+                        )
+                    } else {
+                        // Land: biome-colored with elevation shading
+                        let elev = (h * 3.0).clamp(0.0, 1.0);
+                        match biome {
+                            crate::map_editor::data::Biome::Temperate => egui::Color32::from_rgb(
+                                (30.0 + elev * 40.0) as u8,
+                                (70.0 + elev * 90.0) as u8,
+                                (25.0 + elev * 30.0) as u8,
+                            ),
+                            crate::map_editor::data::Biome::Arid => egui::Color32::from_rgb(
+                                (140.0 + elev * 60.0) as u8,
+                                (110.0 + elev * 50.0) as u8,
+                                (60.0 + elev * 30.0) as u8,
+                            ),
+                            crate::map_editor::data::Biome::Tundra => egui::Color32::from_rgb(
+                                (80.0 + elev * 70.0) as u8,
+                                (100.0 + elev * 80.0) as u8,
+                                (90.0 + elev * 60.0) as u8,
+                            ),
+                            crate::map_editor::data::Biome::Arctic => egui::Color32::from_rgb(
+                                (180.0 + elev * 50.0) as u8,
+                                (195.0 + elev * 40.0) as u8,
+                                (210.0 + elev * 30.0) as u8,
+                            ),
+                        }
+                    };
+
+                    let screen_x = rect.left() + px as f32 * px_size;
+                    let screen_y = rect.top() + pz as f32 * px_size;
+                    painter.rect_filled(
+                        egui::Rect::from_min_size(
+                            egui::Pos2::new(screen_x, screen_y),
+                            egui::Vec2::splat(px_size + 0.5),
+                        ),
+                        0.0,
+                        color,
+                    );
+                }
+            }
+
+            // Helper: convert world pos to minimap screen pos
+            let world_to_minimap = |wx: f32, wz: f32| -> egui::Pos2 {
+                let nx = (wx + map_w / 2.0) / map_w;
+                let nz = (wz + map_h / 2.0) / map_h;
+                egui::Pos2::new(
+                    rect.left() + nx * minimap_size,
+                    rect.top() + nz * minimap_size,
+                )
+            };
+
+            // Draw creature dots
+            for (_e, ct, creature, _aggro) in creature_query.iter() {
+                if creature.state == creatures::CreatureState::Dead {
+                    continue;
+                }
+                let pos = ct.translation;
+                let dot_pos = world_to_minimap(pos.x, pos.z);
+                if !rect.contains(dot_pos) {
+                    continue;
+                }
+                let (dot_color, dot_size) = match creature.creature_type {
+                    creatures::CreatureType::Fox => (egui::Color32::from_rgb(255, 165, 50), 3.0), // orange companion
+                    creatures::CreatureType::Monster => (egui::Color32::from_rgb(220, 40, 40), 3.5), // red hostile
+                    creatures::CreatureType::Alien => (egui::Color32::from_rgb(180, 30, 180), 3.0), // purple hostile
+                    creatures::CreatureType::Triangaroo => {
+                        (egui::Color32::from_rgb(200, 200, 50), 2.5)
+                    } // yellow
+                    creatures::CreatureType::RobotTrilobite => {
+                        (egui::Color32::from_rgb(50, 200, 255), 2.5)
+                    } // cyan defender
+                    _ => (egui::Color32::from_rgb(150, 150, 150), 2.0), // gray
+                };
+                painter.circle_filled(dot_pos, dot_size, dot_color);
+            }
+
+            // Draw player position (bright cyan/white)
+            let p_screen = world_to_minimap(player.position.x, player.position.z);
+            painter.circle_filled(
+                p_screen,
+                5.0,
+                egui::Color32::from_rgba_premultiplied(100, 200, 255, 80),
+            );
+            painter.circle_filled(p_screen, 3.5, egui::Color32::from_rgb(0, 220, 255));
+            painter.circle_filled(p_screen, 1.5, egui::Color32::WHITE);
+
+            // === Directional arrow ===
+            let yaw = player.rotation_yaw;
+            let arrow_len = 9.0;
+            let arrow_tip = egui::Pos2::new(
+                p_screen.x + yaw.sin() * arrow_len,
+                p_screen.y - yaw.cos() * arrow_len,
+            );
+            let left = egui::Pos2::new(
+                p_screen.x + (yaw + 2.5).sin() * (arrow_len * 0.55),
+                p_screen.y - (yaw + 2.5).cos() * (arrow_len * 0.55),
+            );
+            let right = egui::Pos2::new(
+                p_screen.x + (yaw - 2.5).sin() * (arrow_len * 0.55),
+                p_screen.y - (yaw - 2.5).cos() * (arrow_len * 0.55),
+            );
+
+            painter.add(egui::Shape::convex_polygon(
+                vec![arrow_tip, left, right],
+                egui::Color32::from_rgb(255, 220, 50), // yellow arrow
+                egui::Stroke::NONE,
+            ));
+
+            // Draw border
+            painter.rect_stroke(
+                rect,
+                2.0,
+                egui::Stroke::new(1.5, egui::Color32::from_rgb(60, 80, 110)),
+                egui::epaint::StrokeKind::Outside,
+            );
+
+            // Coordinates label
+            ui.label(
+                egui::RichText::new(format!(
+                    "X:{:.0}  Z:{:.0}",
+                    player.position.x, player.position.z
+                ))
+                .small()
+                .color(egui::Color32::from_rgb(140, 170, 200)),
+            );
+        });
+
+    // Store water level for minimap to use (avoids extra query param)
+    if let Ok(_ctx) = contexts.ctx_mut() {
+        // We can't query WaterSettings here without adding another param,
+        // so we pass it through egui's temp data from the existing water_settings access in player movement
+    }
 }
 
 // System governing visual weapon replacement dynamically
@@ -6349,8 +6679,10 @@ fn play_weapon_sync_system(
                         .spawn((
                             Mesh3d(handle_mesh),
                             MeshMaterial3d(handle_mat),
-                            Transform::from_xyz(0.0, -0.15, 0.15).with_rotation(
-                                Quat::from_rotation_x(std::f32::consts::FRAC_PI_2 - 0.1),
+                            Transform::from_xyz(0.01, 0.08, 0.02).with_rotation(
+                                Quat::from_rotation_x(0.15)
+                                    * Quat::from_rotation_z(-0.7)
+                                    * Quat::from_rotation_y(-0.2),
                             ),
                             PlayWeaponVisual {
                                 weapon_type: ActiveWeapon::Melee,
@@ -6917,16 +7249,12 @@ fn weapon_attachment_system(
     let is_first_person = camera.view_mode == ViewMode::FirstPerson;
 
     for (weapon_entity, visual, parent) in weapon_query.iter() {
-        if is_first_person {
+        if is_first_person && visual.weapon_type != ActiveWeapon::Melee {
             // If it's not already on the camera, move it to the camera
             if parent.parent() != cam_entity {
                 commands.entity(cam_entity).add_child(weapon_entity);
                 // Set the local transform for a perfect FPS viewmodel
                 let (offset, rot) = match visual.weapon_type {
-                    ActiveWeapon::Melee => (
-                        Vec3::new(0.3, -0.3, -0.5),
-                        Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
-                    ),
                     ActiveWeapon::Pistol | ActiveWeapon::Revolver => {
                         // Point straight ahead relative to camera (undo the 180 deg rotation that caused it to be sideways/backwards)
                         (
@@ -6938,6 +7266,7 @@ fn weapon_attachment_system(
                         Vec3::new(0.2, -0.2, -0.5),
                         Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2),
                     ),
+                    ActiveWeapon::Melee => unreachable!(),
                 };
                 commands
                     .entity(weapon_entity)
@@ -6954,8 +7283,10 @@ fn weapon_attachment_system(
                 ActiveWeapon::Melee => {
                     if visual.is_sword {
                         (
-                            Vec3::new(0.0, -0.05, 0.05),
-                            Quat::from_rotation_x(std::f32::consts::FRAC_PI_2 - 0.1),
+                            Vec3::new(0.01, 0.08, 0.02),
+                            Quat::from_rotation_x(0.15)
+                                * Quat::from_rotation_z(-0.7)
+                                * Quat::from_rotation_y(-0.2),
                         )
                     } else {
                         (Vec3::new(0.0, 0.30, 0.0), Quat::from_rotation_x(-0.25))
@@ -6974,7 +7305,7 @@ fn weapon_attachment_system(
                     Quat::from_rotation_y(std::f32::consts::PI),
                 ),
             };
-            if need_reparent {
+            if need_reparent || visual.weapon_type == ActiveWeapon::Melee {
                 commands
                     .entity(weapon_entity)
                     .insert(Transform::from_translation(offset).with_rotation(rot));
@@ -7763,7 +8094,6 @@ fn play_sky_cycle_system(
     }
 }
 
-use crate::play_mode::creatures::PlayCreature;
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn gun_fire_and_bullet_system(
     mut commands: Commands,
@@ -8160,48 +8490,7 @@ fn gun_fire_and_bullet_system(
             if creature.health <= 0.0 {
                 creature.state = creatures::CreatureState::Dead;
                 creature.death_timer = 0.0;
-
-                // Spawn a physical ammo and loot drop box or a health pack!
-                let drop_pos = Vec3::new(c_pos.x, c_pos.y + 0.3, c_pos.z);
-
-                let wood_loot = 1 + (rand::random::<f32>() * 3.0) as u32; // 1 to 3
-                let copper_loot = (rand::random::<f32>() * 3.0) as u32; // 0 to 2
-                let iron_loot = (rand::random::<f32>() * 2.0) as u32; // 0 to 1
-
-                if rand::random::<f32>() < 0.4 {
-                    // Spawn a Health Pack!
-                    commands.spawn((
-                        WorldAssetRoot(asset_server.load("Prop_HealthPack.gltf#Scene0")),
-                        Transform::from_translation(drop_pos).with_scale(Vec3::splat(1.5)),
-                        AmmoDrop {
-                            health_heal: 35.0,
-                            ..default()
-                        },
-                        SpinDrop,
-                        PlayModeEntity,
-                    ));
-                    inventory_log("💀 Struck creature down! Health Pack Drop Spawned!");
-                } else {
-                    // Spawn a standard Ammo/Loot Drop!
-                    commands.spawn((
-                        WorldAssetRoot(asset_server.load("Gun_Sniper_Ammo.gltf#Scene0")),
-                        Transform::from_translation(drop_pos).with_scale(Vec3::splat(1.8)),
-                        AmmoDrop {
-                            ammo_pistol: 12,
-                            ammo_revolver: 6,
-                            ammo_rifle: 30,
-                            ammo_sniper: 5,
-                            wood: wood_loot,
-                            copper: copper_loot,
-                            iron: iron_loot,
-                            health_heal: 0.0,
-                            ..default()
-                        },
-                        SpinDrop,
-                        PlayModeEntity,
-                    ));
-                    inventory_log("💀 Struck creature down! Ammo Drop Spawned!");
-                }
+                spawn_player_kill_random_drop(&mut commands, &asset_server, c_pos + Vec3::Y * 0.3);
             } else {
                 inventory_log(&format!(
                     "💥 Hit creature! HP remaining: {}/{}",

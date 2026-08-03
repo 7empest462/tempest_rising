@@ -1803,190 +1803,147 @@ fn character_designer_ui(
                 .max_height(ui.available_height())
                 .auto_shrink([false; 2])
                 .show(ui, |ui| {
-            ui.heading("Customization Menu");
-            ui.separator();
+                    ui.heading("Customization Menu");
+                    ui.separator();
 
-            ui.horizontal(|ui| {
-                ui.label("Name:");
-                ui.text_edit_singleline(&mut settings.custom_name);
-            });
+                    ui.horizontal(|ui| {
+                        ui.label("Name:");
+                        ui.text_edit_singleline(&mut settings.custom_name);
+                    });
 
-            ui.add_space(5.0);
-            ui.heading("👕 Outfit & Armor Style");
-            ui.separator();
-            ui.horizontal(|ui| {
-                if ui
-                    .selectable_label(
-                        settings.outfit_style == OutfitStyle::SciFiSuit,
-                        "🚀 Sci-Fi Suit",
-                    )
-                    .clicked()
-                {
-                    settings.outfit_style = OutfitStyle::SciFiSuit;
-                    trigger_rebuild(
-                        &mut commands,
-                        &mut meshes,
-                        &mut materials,
-                        &settings,
-                        &mut physics,
-                        &model_part_query,
-                    );
-                }
-                if ui
-                    .selectable_label(
-                        settings.outfit_style == OutfitStyle::TacticalArmor,
-                        "🛡️ Tactical",
-                    )
-                    .clicked()
-                {
-                    settings.outfit_style = OutfitStyle::TacticalArmor;
-                    trigger_rebuild(
-                        &mut commands,
-                        &mut meshes,
-                        &mut materials,
-                        &settings,
-                        &mut physics,
-                        &model_part_query,
-                    );
-                }
-            });
+                    ui.add_space(5.0);
+                    ui.heading("👕 Outfit & Armor Style");
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        if ui
+                            .selectable_label(
+                                settings.outfit_style == OutfitStyle::SciFiSuit,
+                                "🚀 Sci-Fi Suit",
+                            )
+                            .clicked()
+                        {
+                            settings.outfit_style = OutfitStyle::SciFiSuit;
+                            trigger_rebuild(
+                                &mut commands,
+                                &mut meshes,
+                                &mut materials,
+                                &settings,
+                                &mut physics,
+                                &model_part_query,
+                            );
+                        }
+                        if ui
+                            .selectable_label(
+                                settings.outfit_style == OutfitStyle::TacticalArmor,
+                                "🛡️ Tactical",
+                            )
+                            .clicked()
+                        {
+                            settings.outfit_style = OutfitStyle::TacticalArmor;
+                            trigger_rebuild(
+                                &mut commands,
+                                &mut meshes,
+                                &mut materials,
+                                &settings,
+                                &mut physics,
+                                &model_part_query,
+                            );
+                        }
+                    });
 
-            ui.horizontal(|ui| {
-                if ui
-                    .selectable_label(
-                        settings.outfit_style == OutfitStyle::StylizedHero,
-                        "🦸 Stylized Hero",
-                    )
-                    .clicked()
-                {
-                    settings.outfit_style = OutfitStyle::StylizedHero;
-                    trigger_rebuild(
-                        &mut commands,
-                        &mut meshes,
-                        &mut materials,
-                        &settings,
-                        &mut physics,
-                        &model_part_query,
-                    );
-                }
-                if ui
-                    .selectable_label(
-                        settings.outfit_style == OutfitStyle::SkeletonExoFrame,
-                        "💀 Exo-Skeleton",
-                    )
-                    .clicked()
-                {
-                    settings.outfit_style = OutfitStyle::SkeletonExoFrame;
-                    trigger_rebuild(
-                        &mut commands,
-                        &mut meshes,
-                        &mut materials,
-                        &settings,
-                        &mut physics,
-                        &model_part_query,
-                    );
-                }
-                if ui
-                    .selectable_label(
-                        settings.outfit_style == OutfitStyle::ClassicMannequin,
-                        "🪵 Classic",
-                    )
-                    .clicked()
-                {
-                    settings.outfit_style = OutfitStyle::ClassicMannequin;
-                    trigger_rebuild(
-                        &mut commands,
-                        &mut meshes,
-                        &mut materials,
-                        &settings,
-                        &mut physics,
-                        &model_part_query,
-                    );
-                }
-            });
+                    ui.horizontal(|ui| {
+                        if ui
+                            .selectable_label(
+                                settings.outfit_style == OutfitStyle::StylizedHero,
+                                "🦸 Stylized Hero",
+                            )
+                            .clicked()
+                        {
+                            settings.outfit_style = OutfitStyle::StylizedHero;
+                            trigger_rebuild(
+                                &mut commands,
+                                &mut meshes,
+                                &mut materials,
+                                &settings,
+                                &mut physics,
+                                &model_part_query,
+                            );
+                        }
+                        if ui
+                            .selectable_label(
+                                settings.outfit_style == OutfitStyle::SkeletonExoFrame,
+                                "💀 Exo-Skeleton",
+                            )
+                            .clicked()
+                        {
+                            settings.outfit_style = OutfitStyle::SkeletonExoFrame;
+                            trigger_rebuild(
+                                &mut commands,
+                                &mut meshes,
+                                &mut materials,
+                                &settings,
+                                &mut physics,
+                                &model_part_query,
+                            );
+                        }
+                        if ui
+                            .selectable_label(
+                                settings.outfit_style == OutfitStyle::ClassicMannequin,
+                                "🪵 Classic",
+                            )
+                            .clicked()
+                        {
+                            settings.outfit_style = OutfitStyle::ClassicMannequin;
+                            trigger_rebuild(
+                                &mut commands,
+                                &mut meshes,
+                                &mut materials,
+                                &settings,
+                                &mut physics,
+                                &model_part_query,
+                            );
+                        }
+                    });
 
-            ui.add_space(5.0);
-            ui.label("Gender Style:");
-            ui.horizontal(|ui| {
-                if ui
-                    .selectable_label(settings.gender == Gender::Male, "♂ Male Body")
-                    .clicked()
-                {
-                    settings.gender = Gender::Male;
-                    trigger_rebuild(
-                        &mut commands,
-                        &mut meshes,
-                        &mut materials,
-                        &settings,
-                        &mut physics,
-                        &model_part_query,
-                    );
-                }
-                if ui
-                    .selectable_label(settings.gender == Gender::Female, "♀ Female Body")
-                    .clicked()
-                {
-                    settings.gender = Gender::Female;
-                    trigger_rebuild(
-                        &mut commands,
-                        &mut meshes,
-                        &mut materials,
-                        &settings,
-                        &mut physics,
-                        &model_part_query,
-                    );
-                }
-            });
+                    ui.add_space(5.0);
+                    ui.label("Gender Style:");
+                    ui.horizontal(|ui| {
+                        if ui
+                            .selectable_label(settings.gender == Gender::Male, "♂ Male Body")
+                            .clicked()
+                        {
+                            settings.gender = Gender::Male;
+                            trigger_rebuild(
+                                &mut commands,
+                                &mut meshes,
+                                &mut materials,
+                                &settings,
+                                &mut physics,
+                                &model_part_query,
+                            );
+                        }
+                        if ui
+                            .selectable_label(settings.gender == Gender::Female, "♀ Female Body")
+                            .clicked()
+                        {
+                            settings.gender = Gender::Female;
+                            trigger_rebuild(
+                                &mut commands,
+                                &mut meshes,
+                                &mut materials,
+                                &settings,
+                                &mut physics,
+                                &model_part_query,
+                            );
+                        }
+                    });
 
-            ui.add_space(5.0);
-            let prev_h = settings.height;
-            ui.add(egui::Slider::new(&mut settings.height, 1.2..=2.2).text("Height Adjuster"));
-            if settings.height != prev_h {
-                trigger_rebuild(
-                    &mut commands,
-                    &mut meshes,
-                    &mut materials,
-                    &settings,
-                    &mut physics,
-                    &model_part_query,
-                );
-            }
-
-            let prev_w = settings.weight;
-            ui.add(egui::Slider::new(&mut settings.weight, 0.5..=1.5).text("Weight Adjuster"));
-            if settings.weight != prev_w {
-                trigger_rebuild(
-                    &mut commands,
-                    &mut meshes,
-                    &mut materials,
-                    &settings,
-                    &mut physics,
-                    &model_part_query,
-                );
-            }
-
-            let prev_head = settings.head_scale;
-            ui.add(egui::Slider::new(&mut settings.head_scale, 0.7..=1.4).text("Head Scale"));
-            if settings.head_scale != prev_head {
-                trigger_rebuild(
-                    &mut commands,
-                    &mut meshes,
-                    &mut materials,
-                    &settings,
-                    &mut physics,
-                    &model_part_query,
-                );
-            }
-
-            ui.add_space(5.0);
-            egui::CollapsingHeader::new("🧬 Realistic Proportions")
-                .default_open(true)
-                .show(ui, |ui| {
-                    let prev_muscle = settings.muscle_mass;
+                    ui.add_space(5.0);
+                    let prev_h = settings.height;
                     ui.add(
-                        egui::Slider::new(&mut settings.muscle_mass, 0.0..=1.5).text("Muscle Mass"),
+                        egui::Slider::new(&mut settings.height, 1.2..=2.2).text("Height Adjuster"),
                     );
-                    if settings.muscle_mass != prev_muscle {
+                    if settings.height != prev_h {
                         trigger_rebuild(
                             &mut commands,
                             &mut meshes,
@@ -1997,12 +1954,11 @@ fn character_designer_ui(
                         );
                     }
 
-                    let prev_sh = settings.shoulder_width;
+                    let prev_w = settings.weight;
                     ui.add(
-                        egui::Slider::new(&mut settings.shoulder_width, 0.7..=1.4)
-                            .text("Shoulder Width"),
+                        egui::Slider::new(&mut settings.weight, 0.5..=1.5).text("Weight Adjuster"),
                     );
-                    if settings.shoulder_width != prev_sh {
+                    if settings.weight != prev_w {
                         trigger_rebuild(
                             &mut commands,
                             &mut meshes,
@@ -2013,11 +1969,11 @@ fn character_designer_ui(
                         );
                     }
 
-                    let prev_leg = settings.leg_length;
+                    let prev_head = settings.head_scale;
                     ui.add(
-                        egui::Slider::new(&mut settings.leg_length, 0.7..=1.4).text("Leg Length"),
+                        egui::Slider::new(&mut settings.head_scale, 0.7..=1.4).text("Head Scale"),
                     );
-                    if settings.leg_length != prev_leg {
+                    if settings.head_scale != prev_head {
                         trigger_rebuild(
                             &mut commands,
                             &mut meshes,
@@ -2028,11 +1984,111 @@ fn character_designer_ui(
                         );
                     }
 
-                    let prev_waist = settings.waist_width;
-                    ui.add(
-                        egui::Slider::new(&mut settings.waist_width, 0.7..=1.4).text("Waist Width"),
-                    );
-                    if settings.waist_width != prev_waist {
+                    ui.add_space(5.0);
+                    egui::CollapsingHeader::new("🧬 Realistic Proportions")
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            let prev_muscle = settings.muscle_mass;
+                            ui.add(
+                                egui::Slider::new(&mut settings.muscle_mass, 0.0..=1.5)
+                                    .text("Muscle Mass"),
+                            );
+                            if settings.muscle_mass != prev_muscle {
+                                trigger_rebuild(
+                                    &mut commands,
+                                    &mut meshes,
+                                    &mut materials,
+                                    &settings,
+                                    &mut physics,
+                                    &model_part_query,
+                                );
+                            }
+
+                            let prev_sh = settings.shoulder_width;
+                            ui.add(
+                                egui::Slider::new(&mut settings.shoulder_width, 0.7..=1.4)
+                                    .text("Shoulder Width"),
+                            );
+                            if settings.shoulder_width != prev_sh {
+                                trigger_rebuild(
+                                    &mut commands,
+                                    &mut meshes,
+                                    &mut materials,
+                                    &settings,
+                                    &mut physics,
+                                    &model_part_query,
+                                );
+                            }
+
+                            let prev_leg = settings.leg_length;
+                            ui.add(
+                                egui::Slider::new(&mut settings.leg_length, 0.7..=1.4)
+                                    .text("Leg Length"),
+                            );
+                            if settings.leg_length != prev_leg {
+                                trigger_rebuild(
+                                    &mut commands,
+                                    &mut meshes,
+                                    &mut materials,
+                                    &settings,
+                                    &mut physics,
+                                    &model_part_query,
+                                );
+                            }
+
+                            let prev_waist = settings.waist_width;
+                            ui.add(
+                                egui::Slider::new(&mut settings.waist_width, 0.7..=1.4)
+                                    .text("Waist Width"),
+                            );
+                            if settings.waist_width != prev_waist {
+                                trigger_rebuild(
+                                    &mut commands,
+                                    &mut meshes,
+                                    &mut materials,
+                                    &settings,
+                                    &mut physics,
+                                    &model_part_query,
+                                );
+                            }
+                        });
+
+                    ui.add_space(8.0);
+                    ui.heading("Aesthetics");
+                    ui.separator();
+
+                    let prev_style = settings.hair_style;
+                    ui.label("Hair Style:");
+                    egui::ComboBox::from_label("")
+                        .selected_text(format!("{:?}", settings.hair_style))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut settings.hair_style,
+                                HairStyle::None,
+                                "None (Plain Head)",
+                            );
+                            ui.selectable_value(
+                                &mut settings.hair_style,
+                                HairStyle::Short,
+                                "Short Cut",
+                            );
+                            ui.selectable_value(
+                                &mut settings.hair_style,
+                                HairStyle::Ponytail,
+                                "Ponytail Style",
+                            );
+                            ui.selectable_value(
+                                &mut settings.hair_style,
+                                HairStyle::Spiky,
+                                "Spiky Hair",
+                            );
+                            ui.selectable_value(
+                                &mut settings.hair_style,
+                                HairStyle::Curly,
+                                "Curly Locks",
+                            );
+                        });
+                    if settings.hair_style != prev_style {
                         trigger_rebuild(
                             &mut commands,
                             &mut meshes,
@@ -2041,162 +2097,128 @@ fn character_designer_ui(
                             &mut physics,
                             &model_part_query,
                         );
+                    }
+
+                    ui.add_space(5.0);
+                    ui.label("Hair Color:");
+                    ui.horizontal(|ui| {
+                        let mut c = [
+                            (settings.hair_color.to_srgba().red * 255.0) as u8,
+                            (settings.hair_color.to_srgba().green * 255.0) as u8,
+                            (settings.hair_color.to_srgba().blue * 255.0) as u8,
+                        ];
+                        if ui.color_edit_button_srgb(&mut c).changed() {
+                            settings.hair_color = Color::srgb(
+                                c[0] as f32 / 255.0,
+                                c[1] as f32 / 255.0,
+                                c[2] as f32 / 255.0,
+                            );
+                            trigger_rebuild(
+                                &mut commands,
+                                &mut meshes,
+                                &mut materials,
+                                &settings,
+                                &mut physics,
+                                &model_part_query,
+                            );
+                        }
+                        ui.label(format!("RGB: {}, {}, {}", c[0], c[1], c[2]));
+                    });
+
+                    ui.label("Skin Tone:");
+                    ui.horizontal(|ui| {
+                        let mut c = [
+                            (settings.skin_color.to_srgba().red * 255.0) as u8,
+                            (settings.skin_color.to_srgba().green * 255.0) as u8,
+                            (settings.skin_color.to_srgba().blue * 255.0) as u8,
+                        ];
+                        if ui.color_edit_button_srgb(&mut c).changed() {
+                            settings.skin_color = Color::srgb(
+                                c[0] as f32 / 255.0,
+                                c[1] as f32 / 255.0,
+                                c[2] as f32 / 255.0,
+                            );
+                            trigger_rebuild(
+                                &mut commands,
+                                &mut meshes,
+                                &mut materials,
+                                &settings,
+                                &mut physics,
+                                &model_part_query,
+                            );
+                        }
+                        ui.label("Pick skin tone color");
+                    });
+
+                    ui.add_space(5.0);
+                    ui.checkbox(&mut settings.show_xray, "💀 Show Skeleton (X-Ray View)");
+
+                    ui.add_space(10.0);
+                    ui.heading("Physics Sim");
+                    ui.separator();
+
+                    let ragdoll_label = if settings.is_ragdoll_active {
+                        "⏸ Lock Skeleton (Design Mode)"
+                    } else {
+                        "💥 Launch Ragdoll Physics!"
+                    };
+                    if ui.button(ragdoll_label).clicked() {
+                        settings.is_ragdoll_active = !settings.is_ragdoll_active;
+                        if !settings.is_ragdoll_active {
+                            trigger_rebuild(
+                                &mut commands,
+                                &mut meshes,
+                                &mut materials,
+                                &settings,
+                                &mut physics,
+                                &model_part_query,
+                            );
+                        }
+                    }
+
+                    if settings.is_ragdoll_active
+                        && ui.button("⚡ Give Impulse / Push Ragdoll").clicked()
+                    {
+                        for node in physics.nodes.iter_mut() {
+                            let force = Vec3::new(
+                                (rand::random::<f32>() - 0.5) * 5.0,
+                                rand::random::<f32>() * 8.0 + 2.0,
+                                (rand::random::<f32>() - 0.5) * 5.0,
+                            );
+                            node.position += force * 0.016;
+                        }
+                    }
+
+                    ui.add_space(10.0);
+                    ui.heading("Sprite Renderer");
+                    ui.separator();
+                    ui.label("Capture customized 3D character as 2D sprite sheet!");
+                    if ui.button("📸 Capture Character Sprite").clicked() {
+                        settings.is_sprite_rendered = true;
+                    }
+
+                    if settings.is_sprite_rendered {
+                        ui.add(egui::Label::new(
+                            egui::RichText::new("Character captured as 2D Sprite frame!")
+                                .color(egui::Color32::from_rgb(100, 255, 100))
+                                .strong(),
+                        ));
+                    }
+
+                    ui.add_space(20.0);
+                    if ui
+                        .add(
+                            egui::Button::new("🎮 Design & Enter Play Mode")
+                                .fill(egui::Color32::from_rgb(50, 150, 50)),
+                        )
+                        .clicked()
+                    {
+                        next_state.set(AppState::PlayMode);
+                    }
+                    if ui.button("🚪 Exit to Launcher").clicked() {
+                        next_state.set(AppState::MainMenu);
                     }
                 });
-
-            ui.add_space(8.0);
-            ui.heading("Aesthetics");
-            ui.separator();
-
-            let prev_style = settings.hair_style;
-            ui.label("Hair Style:");
-            egui::ComboBox::from_label("")
-                .selected_text(format!("{:?}", settings.hair_style))
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(
-                        &mut settings.hair_style,
-                        HairStyle::None,
-                        "None (Plain Head)",
-                    );
-                    ui.selectable_value(&mut settings.hair_style, HairStyle::Short, "Short Cut");
-                    ui.selectable_value(
-                        &mut settings.hair_style,
-                        HairStyle::Ponytail,
-                        "Ponytail Style",
-                    );
-                    ui.selectable_value(&mut settings.hair_style, HairStyle::Spiky, "Spiky Hair");
-                    ui.selectable_value(&mut settings.hair_style, HairStyle::Curly, "Curly Locks");
-                });
-            if settings.hair_style != prev_style {
-                trigger_rebuild(
-                    &mut commands,
-                    &mut meshes,
-                    &mut materials,
-                    &settings,
-                    &mut physics,
-                    &model_part_query,
-                );
-            }
-
-            ui.add_space(5.0);
-            ui.label("Hair Color:");
-            ui.horizontal(|ui| {
-                let mut c = [
-                    (settings.hair_color.to_srgba().red * 255.0) as u8,
-                    (settings.hair_color.to_srgba().green * 255.0) as u8,
-                    (settings.hair_color.to_srgba().blue * 255.0) as u8,
-                ];
-                if ui.color_edit_button_srgb(&mut c).changed() {
-                    settings.hair_color = Color::srgb(
-                        c[0] as f32 / 255.0,
-                        c[1] as f32 / 255.0,
-                        c[2] as f32 / 255.0,
-                    );
-                    trigger_rebuild(
-                        &mut commands,
-                        &mut meshes,
-                        &mut materials,
-                        &settings,
-                        &mut physics,
-                        &model_part_query,
-                    );
-                }
-                ui.label(format!("RGB: {}, {}, {}", c[0], c[1], c[2]));
-            });
-
-            ui.label("Skin Tone:");
-            ui.horizontal(|ui| {
-                let mut c = [
-                    (settings.skin_color.to_srgba().red * 255.0) as u8,
-                    (settings.skin_color.to_srgba().green * 255.0) as u8,
-                    (settings.skin_color.to_srgba().blue * 255.0) as u8,
-                ];
-                if ui.color_edit_button_srgb(&mut c).changed() {
-                    settings.skin_color = Color::srgb(
-                        c[0] as f32 / 255.0,
-                        c[1] as f32 / 255.0,
-                        c[2] as f32 / 255.0,
-                    );
-                    trigger_rebuild(
-                        &mut commands,
-                        &mut meshes,
-                        &mut materials,
-                        &settings,
-                        &mut physics,
-                        &model_part_query,
-                    );
-                }
-                ui.label("Pick skin tone color");
-            });
-
-            ui.add_space(5.0);
-            ui.checkbox(&mut settings.show_xray, "💀 Show Skeleton (X-Ray View)");
-
-            ui.add_space(10.0);
-            ui.heading("Physics Sim");
-            ui.separator();
-
-            let ragdoll_label = if settings.is_ragdoll_active {
-                "⏸ Lock Skeleton (Design Mode)"
-            } else {
-                "💥 Launch Ragdoll Physics!"
-            };
-            if ui.button(ragdoll_label).clicked() {
-                settings.is_ragdoll_active = !settings.is_ragdoll_active;
-                if !settings.is_ragdoll_active {
-                    trigger_rebuild(
-                        &mut commands,
-                        &mut meshes,
-                        &mut materials,
-                        &settings,
-                        &mut physics,
-                        &model_part_query,
-                    );
-                }
-            }
-
-            if settings.is_ragdoll_active && ui.button("⚡ Give Impulse / Push Ragdoll").clicked()
-            {
-                for node in physics.nodes.iter_mut() {
-                    let force = Vec3::new(
-                        (rand::random::<f32>() - 0.5) * 5.0,
-                        rand::random::<f32>() * 8.0 + 2.0,
-                        (rand::random::<f32>() - 0.5) * 5.0,
-                    );
-                    node.position += force * 0.016;
-                }
-            }
-
-            ui.add_space(10.0);
-            ui.heading("Sprite Renderer");
-            ui.separator();
-            ui.label("Capture customized 3D character as 2D sprite sheet!");
-            if ui.button("📸 Capture Character Sprite").clicked() {
-                settings.is_sprite_rendered = true;
-            }
-
-            if settings.is_sprite_rendered {
-                ui.add(egui::Label::new(
-                    egui::RichText::new("Character captured as 2D Sprite frame!")
-                        .color(egui::Color32::from_rgb(100, 255, 100))
-                        .strong(),
-                ));
-            }
-
-            ui.add_space(20.0);
-            if ui
-                .add(
-                    egui::Button::new("🎮 Design & Enter Play Mode")
-                        .fill(egui::Color32::from_rgb(50, 150, 50)),
-                )
-                .clicked()
-            {
-                next_state.set(AppState::PlayMode);
-            }
-            if ui.button("🚪 Exit to Launcher").clicked() {
-                next_state.set(AppState::MainMenu);
-            }
-            });
         });
 }
 

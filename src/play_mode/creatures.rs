@@ -1,6 +1,6 @@
 use crate::map_editor::data::TempestMap;
 use crate::play_mode::{
-    PlayModeEntity, PlayModePlayer, get_bilinear_height, get_effective_floor_height,
+    PlayModeEntity, PlayModePlayer, get_bilinear_height, get_effective_floor_height, nav,
 };
 use bevy::animation::prelude::*;
 use bevy::gltf::GltfAssetLabel;
@@ -44,6 +44,33 @@ pub struct PlayCreature {
     pub is_grounded: bool,
     pub death_timer: f32,
     pub attack_cooldown: f32,
+    pub nav_path: Vec<Vec3>,
+    pub nav_path_index: usize,
+    pub stuck_timer: f32,
+    pub last_progress_pos: Vec3,
+}
+
+impl Default for PlayCreature {
+    fn default() -> Self {
+        Self {
+            creature_type: CreatureType::Triangaroo,
+            state: CreatureState::Idle,
+            health: 10.0,
+            max_health: 10.0,
+            position: Vec3::ZERO,
+            velocity: Vec3::ZERO,
+            yaw: 0.0,
+            wander_timer: 0.0,
+            hop_cooldown: 0.0,
+            is_grounded: true,
+            death_timer: 0.0,
+            attack_cooldown: 0.0,
+            nav_path: Vec::new(),
+            nav_path_index: 0,
+            stuck_timer: 0.0,
+            last_progress_pos: Vec3::ZERO,
+        }
+    }
 }
 
 #[derive(Component)]
@@ -379,6 +406,10 @@ pub fn spawn_defender_trilobite(
             is_grounded: true,
             death_timer: 0.0,
             attack_cooldown: 0.0,
+            nav_path: Vec::new(),
+            nav_path_index: 0,
+            stuck_timer: 0.0,
+            last_progress_pos: Vec3::ZERO,
         },
         PlayerDefender,
         PlayModeEntity,
@@ -464,6 +495,10 @@ pub fn spawn_creatures_system(
                 is_grounded: true,
                 death_timer: 0.0,
                 attack_cooldown: 0.0,
+                nav_path: Vec::new(),
+                nav_path_index: 0,
+                stuck_timer: 0.0,
+                last_progress_pos: Vec3::ZERO,
             },
             PlayModeEntity,
             Visibility::Visible,
@@ -499,6 +534,10 @@ pub fn spawn_creatures_system(
                 is_grounded: true,
                 death_timer: 0.0,
                 attack_cooldown: 0.0,
+                nav_path: Vec::new(),
+                nav_path_index: 0,
+                stuck_timer: 0.0,
+                last_progress_pos: Vec3::ZERO,
             },
             PlayModeEntity,
             Visibility::Visible,
@@ -534,6 +573,10 @@ pub fn spawn_creatures_system(
                     is_grounded: true,
                     death_timer: 0.0,
                     attack_cooldown: 0.0,
+                    nav_path: Vec::new(),
+                    nav_path_index: 0,
+                    stuck_timer: 0.0,
+                    last_progress_pos: Vec3::ZERO,
                 },
                 PlayModeEntity,
                 Visibility::Visible,
@@ -604,6 +647,10 @@ pub fn spawn_creatures_system(
                     is_grounded: false,
                     death_timer: 0.0,
                     attack_cooldown: 0.0,
+                    nav_path: Vec::new(),
+                    nav_path_index: 0,
+                    stuck_timer: 0.0,
+                    last_progress_pos: Vec3::ZERO,
                 },
                 PlayModeEntity,
             ))
@@ -677,6 +724,10 @@ pub fn spawn_creatures_system(
                     is_grounded: false,
                     death_timer: 0.0,
                     attack_cooldown: 0.0,
+                    nav_path: Vec::new(),
+                    nav_path_index: 0,
+                    stuck_timer: 0.0,
+                    last_progress_pos: Vec3::ZERO,
                 },
                 PlayModeEntity,
                 Visibility::Visible,
@@ -753,6 +804,10 @@ pub fn spawn_creatures_system(
                     is_grounded: false, // Make them float!
                     death_timer: 0.0,
                     attack_cooldown: 0.0,
+                    nav_path: Vec::new(),
+                    nav_path_index: 0,
+                    stuck_timer: 0.0,
+                    last_progress_pos: Vec3::ZERO,
                 },
                 PlayModeEntity,
                 avian3d::prelude::RigidBody::Dynamic,
@@ -802,28 +857,43 @@ pub fn spawn_creatures_system(
     // 6. Spawn Alien Settlement (Monolith + 3 futuristic homes) and 3 Alien NPCs
     let w = map.width as f32;
     let h = map.height as f32;
-    let span_x = w * 0.21;
-    let span_z = h * 0.21;
+
+    let house_pos = map
+        .prefabs
+        .iter()
+        .find(|p| p.prefab_type == "house")
+        .map_or(Vec3::new(-35.0, 0.0, -35.0), |p| {
+            Vec3::from_array(p.position)
+        });
+    let house_dir = Vec2::new(house_pos.x, house_pos.z);
+    let alien_dir = if house_dir.length_squared() > 0.01 {
+        -house_dir.normalize()
+    } else {
+        Vec2::new(1.0, 1.0).normalize()
+    };
+    let radius = (w.min(h) * 0.22).clamp(60.0, 280.0);
+    let center_x = alien_dir.x * radius;
+    let center_z = alien_dir.y * radius;
 
     let monolith_pos = Vec3::new(
-        span_x,
-        crate::play_mode::get_bilinear_height(span_x, -span_z, &map),
-        -span_z,
+        center_x,
+        crate::play_mode::get_bilinear_height(center_x, center_z, &map),
+        center_z,
     );
     let h1_pos = Vec3::new(
-        span_x - 6.0,
-        crate::play_mode::get_bilinear_height(span_x - 6.0, -span_z + 6.0, &map),
-        -span_z + 6.0,
+        center_x - 6.0,
+        crate::play_mode::get_bilinear_height(center_x - 6.0, center_z + 6.0, &map),
+        center_z + 6.0,
     );
     let h2_pos = Vec3::new(
-        span_x + 6.0,
-        crate::play_mode::get_bilinear_height(span_x + 6.0, -span_z, &map),
-        -span_z,
+        center_x + 6.0,
+        crate::play_mode::get_bilinear_height(center_x + 6.0, center_z, &map),
+        center_z,
     );
     let h3_pos = Vec3::new(
-        span_x - 5.0,
-        crate::play_mode::get_bilinear_height(span_x - 5.0, -span_z - 6.0, &map),
-        -span_z - 6.0,
+        center_x - 5.0,
+        crate::play_mode::get_bilinear_height(center_x - 5.0, center_z - 6.0, &map),
+        center_z - 6.0,
     );
 
     spawn_alien_monolith(&mut commands, &mut meshes, &mut materials, monolith_pos);
@@ -858,6 +928,10 @@ pub fn spawn_creatures_system(
                 is_grounded: true,
                 death_timer: 0.0,
                 attack_cooldown: 0.0,
+                nav_path: Vec::new(),
+                nav_path_index: 0,
+                stuck_timer: 0.0,
+                last_progress_pos: Vec3::ZERO,
             },
             AggroState {
                 aggro_timer: 0.0,
@@ -967,6 +1041,10 @@ pub fn creature_respawn_system(
                 is_grounded: true,
                 death_timer: 0.0,
                 attack_cooldown: 0.0,
+                nav_path: Vec::new(),
+                nav_path_index: 0,
+                stuck_timer: 0.0,
+                last_progress_pos: Vec3::ZERO,
             },
             PlayModeEntity,
             Visibility::Visible,
@@ -1003,6 +1081,10 @@ pub fn creature_respawn_system(
                 is_grounded: true,
                 death_timer: 0.0,
                 attack_cooldown: 0.0,
+                nav_path: Vec::new(),
+                nav_path_index: 0,
+                stuck_timer: 0.0,
+                last_progress_pos: Vec3::ZERO,
             },
             PlayModeEntity,
             Visibility::Visible,
@@ -1039,6 +1121,10 @@ pub fn creature_respawn_system(
                     is_grounded: true,
                     death_timer: 0.0,
                     attack_cooldown: 0.0,
+                    nav_path: Vec::new(),
+                    nav_path_index: 0,
+                    stuck_timer: 0.0,
+                    last_progress_pos: Vec3::ZERO,
                 },
                 PlayModeEntity,
                 Visibility::Visible,
@@ -1096,7 +1182,7 @@ pub fn creature_ai_system(
         Option<&TamedFox>,
     )>,
     collider_query: Query<
-        (Entity, &crate::play_mode::WallCollider, &Transform),
+        (Entity, &crate::play_mode::WallCollider, &GlobalTransform),
         (Without<PlayModePlayer>, Without<PlayCreature>),
     >,
     door_query: Query<&crate::play_mode::house::HouseDoor>,
@@ -1132,6 +1218,32 @@ pub fn creature_ai_system(
                 && t.as_ref().is_some_and(|tamed| tamed.friendship >= 3)
         })
         .map(|(e, _, t, _, _, _)| (e, t.translation))
+        .collect();
+
+    // Pre-collect ALL alive creature positions & radii for creature-to-creature body collision
+    let all_creature_bodies: Vec<(Entity, Vec3, f32)> = creature_query
+        .iter()
+        .filter(|(_, c, _, _, _, _)| c.state != CreatureState::Dead)
+        .map(|(e, c, t, _, _, _)| {
+            let radius = match c.creature_type {
+                CreatureType::Monster => 1.2,
+                CreatureType::BigBird => 0.8,
+                CreatureType::Triangaroo => 0.5,
+                CreatureType::Fox => 0.35,
+                CreatureType::Alien => 0.6,
+                CreatureType::RobotTrilobite => 0.6,
+                _ => 0.35,
+            };
+            (e, t.translation, radius)
+        })
+        .collect();
+
+    let colliders: Vec<(Vec3, Vec3, bool)> = collider_query
+        .iter()
+        .map(|(entity, collider, col_transform)| {
+            let is_open = door_query.get(entity).is_ok_and(|door| door.is_open);
+            (col_transform.translation(), collider.half_extents, is_open)
+        })
         .collect();
 
     // Apply simple separation between tamed foxes
@@ -1244,7 +1356,10 @@ pub fn creature_ai_system(
                 // Tamed companion foxes skip the swim-to-land AI —
                 // their follow-player logic handles horizontal movement
                 let is_tamed_companion = creature.creature_type == CreatureType::Fox
-                    && tamed_opt.as_ref().map(|t| t.friendship >= 3).unwrap_or(false);
+                    && tamed_opt
+                        .as_ref()
+                        .map(|t| t.friendship >= 3)
+                        .unwrap_or(false);
 
                 if !is_tamed_companion {
                     // Sample 4 directions to swim back toward land/shallow ground
@@ -1391,18 +1506,69 @@ pub fn creature_ai_system(
                         .filter(|(pos, dist)| *dist < 16.0 || pos.distance(player_pos) < 16.0)
                         .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
-                    if let Some((target_pos, _dist)) = nearest_hostile {
-                        let dir = (target_pos - creature.position).normalize_or_zero();
-                        creature.velocity = dir * 5.8;
-                        creature.yaw = dir.z.atan2(dir.x);
+                    if let Some((target_pos, dist)) = nearest_hostile {
+                        // Attack range: stop at the edge of the target body, not inside it
+                        let attack_range = 1.4; // fox radius + typical creature radius
                         creature.state = CreatureState::Attacking;
+                        if dist > attack_range {
+                            let desired_speed = 5.8;
+                            let creature_radius = 0.35;
+                            let (vel, path, path_idx, stuck_timer, last_progress_pos) =
+                                nav::navigate_toward(
+                                    creature.position,
+                                    target_pos,
+                                    desired_speed,
+                                    creature_radius,
+                                    &creature.nav_path,
+                                    creature.nav_path_index,
+                                    creature.stuck_timer,
+                                    creature.last_progress_pos,
+                                    dt,
+                                    &colliders,
+                                    &map,
+                                    water_level,
+                                );
+                            if vel.length_squared() > 0.01 {
+                                creature.yaw = vel.z.atan2(vel.x);
+                            }
+                            creature.velocity = vel;
+                            creature.nav_path = path;
+                            creature.nav_path_index = path_idx;
+                            creature.stuck_timer = stuck_timer;
+                            creature.last_progress_pos = last_progress_pos;
+                        } else {
+                            // Close enough — hold position at attack range
+                            creature.velocity = Vec3::ZERO;
+                        }
                     } else {
                         // Follow player
                         let dist_to_player = creature.position.distance(player_pos);
                         if dist_to_player > 3.2 {
-                            let dir = (player_pos - creature.position).normalize_or_zero();
-                            creature.velocity = dir * 3.8;
-                            creature.yaw = dir.z.atan2(dir.x);
+                            let desired_speed = 3.8;
+                            let creature_radius = 0.35;
+                            let (vel, path, path_idx, stuck_timer, last_progress_pos) =
+                                nav::navigate_toward(
+                                    creature.position,
+                                    player_pos,
+                                    desired_speed,
+                                    creature_radius,
+                                    &creature.nav_path,
+                                    creature.nav_path_index,
+                                    creature.stuck_timer,
+                                    creature.last_progress_pos,
+                                    dt,
+                                    &colliders,
+                                    &map,
+                                    water_level,
+                                );
+                            if vel.length_squared() > 0.01 {
+                                creature.yaw = vel.z.atan2(vel.x);
+                            }
+                            creature.velocity = vel;
+                            creature.nav_path = path;
+                            creature.nav_path_index = path_idx;
+                            creature.stuck_timer = stuck_timer;
+                            creature.last_progress_pos = last_progress_pos;
                             creature.state = CreatureState::Wandering;
                         } else {
                             creature.velocity = Vec3::ZERO;
@@ -1427,12 +1593,22 @@ pub fn creature_ai_system(
 
                         if count > 0 {
                             separation = (separation / count as f32) * 4.5;
+                            separation.y = 0.0;
                             creature.velocity += separation;
                         }
                     }
 
                     let vel = creature.velocity;
                     creature.position += vel * dt;
+
+                    // Clamp fox to terrain after velocity — prevents sinking through ground
+                    if c_water_depth < 1.0 {
+                        let post_terrain =
+                            get_bilinear_height(creature.position.x, creature.position.z, &map);
+                        let post_ground =
+                            get_effective_floor_height(creature.position, post_terrain);
+                        creature.position.y = creature.position.y.max(post_ground);
+                    }
 
                     if creature.state == CreatureState::Idle {
                         creature.position.y += (time.elapsed_secs() * 1.5).sin() * 0.015;
@@ -1579,10 +1755,31 @@ pub fn creature_ai_system(
                 if dist_to_player < 14.0 && player.health > 0.0 {
                     // Chase mode!
                     creature.state = CreatureState::Chasing;
-                    let to_player = (player_pos - creature.position).normalize_or_zero();
-                    creature.yaw = to_player.z.atan2(to_player.x);
-                    creature.velocity = to_player * 3.8;
-                    let vel = creature.velocity;
+                    let desired_speed = 3.8;
+                    let creature_radius = 1.2;
+                    let (vel, path, path_idx, stuck_timer, last_progress_pos) =
+                        nav::navigate_toward(
+                            creature.position,
+                            player_pos,
+                            desired_speed,
+                            creature_radius,
+                            &creature.nav_path,
+                            creature.nav_path_index,
+                            creature.stuck_timer,
+                            creature.last_progress_pos,
+                            dt,
+                            &colliders,
+                            &map,
+                            water_level,
+                        );
+                    if vel.length_squared() > 0.01 {
+                        creature.yaw = vel.z.atan2(vel.x);
+                    }
+                    creature.velocity = vel;
+                    creature.nav_path = path;
+                    creature.nav_path_index = path_idx;
+                    creature.stuck_timer = stuck_timer;
+                    creature.last_progress_pos = last_progress_pos;
                     creature.position += vel * dt; // aggressive charge speed!
 
                     // Attack trigger if next to player
@@ -1606,6 +1803,7 @@ pub fn creature_ai_system(
                         }
 
                         // Push player back
+                        let to_player = (player_pos - creature.position).normalize_or_zero();
                         let push_back = to_player * 6.0;
                         player.position += push_back;
                         for node in player.nodes.iter_mut() {
@@ -1652,10 +1850,31 @@ pub fn creature_ai_system(
                 if is_provoked && dist_to_player < 20.0 && player.health > 0.0 {
                     // Chase and attack player when provoked
                     creature.state = CreatureState::Chasing;
-                    let to_player = (player_pos - creature.position).normalize_or_zero();
-                    creature.yaw = to_player.z.atan2(to_player.x);
-                    creature.velocity = to_player * 3.0;
-                    let vel = creature.velocity;
+                    let desired_speed = 3.0;
+                    let creature_radius = 0.5;
+                    let (vel, path, path_idx, stuck_timer, last_progress_pos) =
+                        nav::navigate_toward(
+                            creature.position,
+                            player_pos,
+                            desired_speed,
+                            creature_radius,
+                            &creature.nav_path,
+                            creature.nav_path_index,
+                            creature.stuck_timer,
+                            creature.last_progress_pos,
+                            dt,
+                            &colliders,
+                            &map,
+                            water_level,
+                        );
+                    if vel.length_squared() > 0.01 {
+                        creature.yaw = vel.z.atan2(vel.x);
+                    }
+                    creature.velocity = vel;
+                    creature.nav_path = path;
+                    creature.nav_path_index = path_idx;
+                    creature.stuck_timer = stuck_timer;
+                    creature.last_progress_pos = last_progress_pos;
                     creature.position += vel * dt;
 
                     if dist_to_player < 1.8 && creature.attack_cooldown <= 0.0 {
@@ -1725,8 +1944,10 @@ pub fn creature_ai_system(
 
                 if let Some((_target_entity, target_pos, target_dist)) = nearest_hostile {
                     // Combat mode — chase and attack the hostile
-                    let to_target = (target_pos - creature.position).normalize_or_zero();
-                    creature.yaw = to_target.z.atan2(to_target.x);
+                    creature.yaw = (target_pos - creature.position)
+                        .normalize_or_zero()
+                        .z
+                        .atan2((target_pos - creature.position).normalize_or_zero().x);
 
                     if target_dist < 2.0 {
                         // In attack range
@@ -1735,14 +1956,60 @@ pub fn creature_ai_system(
                     } else {
                         // Chase toward the hostile
                         creature.state = CreatureState::Chasing;
-                        creature.velocity = to_target * 4.5;
+                        let desired_speed = 4.5;
+                        let creature_radius = 0.6;
+                        let (vel, path, path_idx, stuck_timer, last_progress_pos) =
+                            nav::navigate_toward(
+                                creature.position,
+                                target_pos,
+                                desired_speed,
+                                creature_radius,
+                                &creature.nav_path,
+                                creature.nav_path_index,
+                                creature.stuck_timer,
+                                creature.last_progress_pos,
+                                dt,
+                                &colliders,
+                                &map,
+                                water_level,
+                            );
+                        if vel.length_squared() > 0.01 {
+                            creature.yaw = vel.z.atan2(vel.x);
+                        }
+                        creature.velocity = vel;
+                        creature.nav_path = path;
+                        creature.nav_path_index = path_idx;
+                        creature.stuck_timer = stuck_timer;
+                        creature.last_progress_pos = last_progress_pos;
                     }
                 } else if dist_to_player > 12.0 {
                     // No hostiles nearby — run back to player
                     creature.state = CreatureState::Chasing;
-                    let to_player = (player_pos - creature.position).normalize_or_zero();
-                    creature.yaw = to_player.z.atan2(to_player.x);
-                    creature.velocity = to_player * 4.5;
+                    let desired_speed = 4.5;
+                    let creature_radius = 0.6;
+                    let (vel, path, path_idx, stuck_timer, last_progress_pos) =
+                        nav::navigate_toward(
+                            creature.position,
+                            player_pos,
+                            desired_speed,
+                            creature_radius,
+                            &creature.nav_path,
+                            creature.nav_path_index,
+                            creature.stuck_timer,
+                            creature.last_progress_pos,
+                            dt,
+                            &colliders,
+                            &map,
+                            water_level,
+                        );
+                    if vel.length_squared() > 0.01 {
+                        creature.yaw = vel.z.atan2(vel.x);
+                    }
+                    creature.velocity = vel;
+                    creature.nav_path = path;
+                    creature.nav_path_index = path_idx;
+                    creature.stuck_timer = stuck_timer;
+                    creature.last_progress_pos = last_progress_pos;
                 } else if dist_to_player < 4.0 {
                     // Too close to player - move away from player to prevent piling up
                     creature.state = CreatureState::Wandering;
@@ -1789,6 +2056,16 @@ pub fn creature_ai_system(
             CreatureType::RobotTrilobite => 0.6,
             _ => 0.3,
         };
+        let creature_height = match creature.creature_type {
+            CreatureType::Monster => 2.4,
+            CreatureType::BigBird => 1.6,
+            CreatureType::Triangaroo => 1.2,
+            CreatureType::Alien => 1.8,
+            CreatureType::RobotTrilobite => 0.9,
+            CreatureType::Polypug => 0.8,
+            CreatureType::Fox => 0.7,
+            CreatureType::Bird => 0.6,
+        };
         for (entity, collider, col_transform) in collider_query.iter() {
             if let Ok(door) = door_query.get(entity)
                 && door.is_open
@@ -1796,29 +2073,92 @@ pub fn creature_ai_system(
                 continue;
             }
 
-            let center = col_transform.translation;
+            let center = col_transform.translation();
             let extents = collider.half_extents;
 
-            let closest_point = Vec3::new(
-                creature
-                    .position
-                    .x
-                    .clamp(center.x - extents.x, center.x + extents.x),
-                creature
-                    .position
-                    .y
-                    .clamp(center.y - extents.y, center.y + extents.y),
-                creature
-                    .position
-                    .z
-                    .clamp(center.z - extents.z, center.z + extents.z),
-            );
+            let creature_y_min = creature.position.y;
+            let creature_y_max = creature.position.y + creature_height;
+            let box_y_min = center.y - extents.y;
+            let box_y_max = center.y + extents.y;
+            if creature_y_max < box_y_min || creature_y_min > box_y_max {
+                continue;
+            }
 
-            let dist = creature.position.distance(closest_point);
-            if dist < creature_radius {
-                let penetration = creature_radius - dist;
-                let push_dir = (creature.position - closest_point).normalize_or_zero();
-                creature.position += push_dir * penetration;
+            let closest_x = creature
+                .position
+                .x
+                .clamp(center.x - extents.x, center.x + extents.x);
+            let closest_z = creature
+                .position
+                .z
+                .clamp(center.z - extents.z, center.z + extents.z);
+            let dx = creature.position.x - closest_x;
+            let dz = creature.position.z - closest_z;
+            let dist_sq = dx * dx + dz * dz;
+
+            if dist_sq > 0.000001 {
+                let dist = dist_sq.sqrt();
+                if dist < creature_radius {
+                    let penetration = creature_radius - dist;
+                    creature.position.x += (dx / dist) * penetration;
+                    creature.position.z += (dz / dist) * penetration;
+                    creature.velocity.x *= 0.2;
+                    creature.velocity.z *= 0.2;
+                }
+            } else {
+                let overlap_left = creature.position.x - (center.x - extents.x);
+                let overlap_right = (center.x + extents.x) - creature.position.x;
+                let overlap_back = creature.position.z - (center.z - extents.z);
+                let overlap_front = (center.z + extents.z) - creature.position.z;
+
+                let min_overlap = overlap_left
+                    .min(overlap_right)
+                    .min(overlap_back)
+                    .min(overlap_front);
+
+                if (min_overlap - overlap_left).abs() < 0.0001 {
+                    creature.position.x = (center.x - extents.x) - creature_radius;
+                } else if (min_overlap - overlap_right).abs() < 0.0001 {
+                    creature.position.x = (center.x + extents.x) + creature_radius;
+                } else if (min_overlap - overlap_back).abs() < 0.0001 {
+                    creature.position.z = (center.z - extents.z) - creature_radius;
+                } else {
+                    creature.position.z = (center.z + extents.z) + creature_radius;
+                }
+                creature.velocity.x = 0.0;
+                creature.velocity.z = 0.0;
+            }
+        }
+
+        // Creature-to-creature body collision — prevents overlapping
+        for (other_e, other_pos, other_radius) in &all_creature_bodies {
+            if *other_e == entity {
+                continue;
+            }
+            let dx = creature.position.x - other_pos.x;
+            let dz = creature.position.z - other_pos.z;
+            let dist_xz = (dx * dx + dz * dz).sqrt();
+            let min_dist = creature_radius + other_radius;
+            if dist_xz < min_dist && dist_xz > 0.001 {
+                let penetration = min_dist - dist_xz;
+                // Push this creature away (half the penetration; the other creature gets the other half next iteration)
+                creature.position.x += (dx / dist_xz) * penetration * 0.5;
+                creature.position.z += (dz / dist_xz) * penetration * 0.5;
+            }
+        }
+
+        // Player-to-creature body collision — player can't walk through creatures
+        {
+            let dx = player.position.x - creature.position.x;
+            let dz = player.position.z - creature.position.z;
+            let dist_xz = (dx * dx + dz * dz).sqrt();
+            let player_radius = 0.4;
+            let min_dist = player_radius + creature_radius;
+            if dist_xz < min_dist && dist_xz > 0.001 {
+                let penetration = min_dist - dist_xz;
+                // Push creature away from player
+                creature.position.x -= (dx / dist_xz) * penetration;
+                creature.position.z -= (dz / dist_xz) * penetration;
             }
         }
 
@@ -2170,6 +2510,10 @@ pub fn spawn_saved_tamed_foxes(
                             is_grounded: true,
                             death_timer: 0.0,
                             attack_cooldown: 0.0,
+                            nav_path: Vec::new(),
+                            nav_path_index: 0,
+                            stuck_timer: 0.0,
+                            last_progress_pos: Vec3::ZERO,
                         },
                         TamedFox {
                             name: name.clone(),
@@ -2220,6 +2564,10 @@ pub fn spawn_saved_tamed_foxes(
                             is_grounded: true,
                             death_timer: 0.0,
                             attack_cooldown: 0.0,
+                            nav_path: Vec::new(),
+                            nav_path_index: 0,
+                            stuck_timer: 0.0,
+                            last_progress_pos: Vec3::ZERO,
                         },
                         TamedFox {
                             name: name.clone(),
