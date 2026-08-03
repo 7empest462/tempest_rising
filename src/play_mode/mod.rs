@@ -3451,7 +3451,7 @@ fn player_movement_and_ragdoll_system(
                     }
 
                     params.commands.spawn((
-                        AudioPlayer::new(params.asset_server.load("pistol_shoot.wav")),
+                        AudioPlayer::new(params.asset_server.load("plasma_cannon.wav")),
                         PlaybackSettings::DESPAWN,
                     ));
                     inventory_log("⚡ Starfighter Dual Plasma Cannons Fired!");
