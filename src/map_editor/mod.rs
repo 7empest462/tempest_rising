@@ -3472,8 +3472,8 @@ fn map_editor_ui(
                                     // Carve out deep, substantial lakes and ponds where lake_val < -0.22
                                     if lake_val < -0.22 {
                                         let lake_factor = ((-0.22 - lake_val) / 0.78).clamp(0.0, 1.0);
-                                        let carved_lake_y = -1.5 - lake_factor.powf(1.3) * 4.5; // -1.5m to -6.0m deep!
-                                        final_height = base_land_height * (1.0 - lake_factor) + carved_lake_y * lake_factor;
+                                        let carved_l_y = -1.5 - lake_factor.powf(1.3) * 4.5; // -1.5m to -6.0m deep!
+                                        final_height = base_land_height * (1.0 - lake_factor) + carved_l_y * lake_factor;
                                     }
 
                                     final_height -= noise_settings.height_offset;
@@ -3482,7 +3482,7 @@ fn map_editor_ui(
                                         let dx = (x as f32 - (w as f32 / 2.0)) / (w as f32 / 2.0);
                                         let dz = (z as f32 - (h as f32 / 2.0)) / (h as f32 / 2.0);
                                         let d = (dx * dx + dz * dz).sqrt();
-                                        let mask = (1.0 - d.powf(2.4)).clamp(0.0, 1.0);
+                                        let mask = (1.0 - d.powf(3.2)).clamp(0.0, 1.0);
                                         let ocean_depth = -8.0;
                                         final_height =
                                             final_height * mask + ocean_depth * (1.0 - mask);
@@ -3544,9 +3544,12 @@ fn map_editor_ui(
                             let max_z_idx =
                                 ((house_pos.z + half_d + 2.0) + half_map_h).min(h as f32) as u32;
 
+                            let natural_h = map.get_height(house_pos.x as u32, house_pos.z as u32);
+                            let house_ground_y = natural_h.clamp(1.5, 45.0);
+
                             for mz in min_z_idx..max_z_idx {
                                 for mx in min_x_idx..max_x_idx {
-                                    map.set_height(mx, mz, 1.5);
+                                    map.set_height(mx, mz, house_ground_y);
                                     map.set_biome(mx, mz, Biome::Temperate);
                                 }
                             }
@@ -3581,21 +3584,35 @@ fn map_editor_ui(
                                 None,
                             );
 
-                            // 2c. Spawn Natural Cave Entrances across map quadrants if enabled
+                            // 2c. Spawn Natural Cave Entrances inland on dry land if enabled
                             if biome_selection.generate_caves {
                                 let cave_coords = [
-                                    Vec3::new(-half_map_w * 0.5, 0.0, -half_map_h * 0.5),
-                                    Vec3::new(half_map_w * 0.5, 0.0, -half_map_h * 0.5),
-                                    Vec3::new(-half_map_w * 0.5, 0.0, half_map_h * 0.5),
-                                    Vec3::new(half_map_w * 0.5, 0.0, half_map_h * 0.5),
+                                    Vec3::new(-150.0, 0.0, -140.0),
+                                    Vec3::new(160.0, 0.0, -130.0),
+                                    Vec3::new(-140.0, 0.0, 150.0),
+                                    Vec3::new(170.0, 0.0, 140.0),
                                 ];
 
                                 for mut c_pos in cave_coords {
-                                    let cx_idx = ((c_pos.x + half_map_w).round() as i32)
-                                        .clamp(0, w as i32 - 1) as u32;
-                                    let cz_idx = ((c_pos.z + half_map_h).round() as i32)
-                                        .clamp(0, h as i32 - 1) as u32;
-                                    c_pos.y = map.get_height(cx_idx, cz_idx);
+                                    let mut cx_idx = ((c_pos.x + half_map_w).round() as i32)
+                                        .clamp(1, w as i32 - 2) as u32;
+                                    let mut cz_idx = ((c_pos.z + half_map_h).round() as i32)
+                                        .clamp(1, h as i32 - 2) as u32;
+                                    let mut h_ground = map.get_height(cx_idx, cz_idx);
+
+                                    // Step inward toward center if selected spot is in ocean (< 1.6m)
+                                    let mut step = 0;
+                                    while h_ground < 1.6 && step < 15 {
+                                        c_pos.x *= 0.85;
+                                        c_pos.z *= 0.85;
+                                        cx_idx = ((c_pos.x + half_map_w).round() as i32)
+                                            .clamp(1, w as i32 - 2) as u32;
+                                        cz_idx = ((c_pos.z + half_map_h).round() as i32)
+                                            .clamp(1, h as i32 - 2) as u32;
+                                        h_ground = map.get_height(cx_idx, cz_idx);
+                                        step += 1;
+                                    }
+                                    c_pos.y = h_ground;
 
                                     let prefab_idx = map.prefabs.len();
                                     map.prefabs.push(PlacedPrefab {
@@ -5450,9 +5467,12 @@ fn terrain_sculpting_system(
                     let max_z_idx = ((intersection.z + half_d + 2.0) + half_map_h)
                         .min(map.height as f32) as u32;
 
+                    let natural_h = map.get_height(intersection.x as u32, intersection.z as u32);
+                    let house_ground_y = natural_h.clamp(1.5, 45.0);
+
                     for mz in min_z_idx..max_z_idx {
                         for mx in min_x_idx..max_x_idx {
-                            map.set_height(mx, mz, 1.5);
+                            map.set_height(mx, mz, house_ground_y);
                             map.set_biome(mx, mz, Biome::Temperate);
                         }
                     }
@@ -6034,9 +6054,10 @@ pub fn generate_roads_on_map(map: &mut TempestMap) {
                                     // Water: paint a bridge and leave terrain height natural (deep)
                                     map.set_road(nx as u32, nz as u32, 3);
                                 } else {
-                                    // Land: paint standard road and set graded dry height
+                                    // Land: paint standard road and set smooth graded height following natural contours
                                     map.set_road(nx as u32, nz as u32, road_type);
-                                    map.set_height(nx as u32, nz as u32, road_h);
+                                    let cell_road_h = neighbor_original_h * 0.7 + road_h * 0.3;
+                                    map.set_height(nx as u32, nz as u32, cell_road_h.max(1.35));
                                 }
                             }
                         }
@@ -6052,7 +6073,7 @@ pub fn generate_roads_on_map(map: &mut TempestMap) {
                                     let curr_h = map.get_height(nx as u32, nz as u32);
                                     // Only smooth land cells, do not fill in waterways
                                     if curr_h > 1.2 {
-                                        let blend_h = curr_h * 0.5 + road_h * 0.5;
+                                        let blend_h = curr_h * 0.85 + road_h * 0.15;
                                         map.set_height(nx as u32, nz as u32, blend_h.max(1.35));
                                     }
                                 }

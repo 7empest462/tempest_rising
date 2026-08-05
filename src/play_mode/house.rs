@@ -1,6 +1,8 @@
 use crate::AppState;
 use crate::map_editor::data::{Biome, TempestMap};
-use crate::play_mode::{PlayModeEntity, PlayModePlayer, PlayerInventory, WallCollider};
+use crate::play_mode::{
+    get_bilinear_height, PlayModeEntity, PlayModePlayer, PlayerInventory, WallCollider,
+};
 use avian3d::prelude::{Collider, Position, RigidBody};
 use bevy::prelude::*;
 use bevy_egui::egui;
@@ -160,14 +162,34 @@ pub fn flatten_terrain(
     let half_w = (mansion_settings.cols as f32 * mansion_settings.cell_size) / 2.0;
     let half_d = (mansion_settings.rows as f32 * mansion_settings.cell_size) / 2.0;
 
-    let min_x_idx = ((house_pos.x - half_w - 8.0) + half_map_w).max(0.0) as u32;
-    let max_x_idx = ((house_pos.x + half_w + 8.0) + half_map_w).min(map.width as f32) as u32;
-    let min_z_idx = ((house_pos.z - half_d - 8.0) + half_map_h).max(0.0) as u32;
-    let max_z_idx = ((house_pos.z + half_d + 8.0) + half_map_h).min(map.height as f32) as u32;
+    // Sample natural terrain height around the house center to avoid digging deep ruts down to water level
+    let natural_h = get_bilinear_height(house_pos.x, house_pos.z, &map);
+    let house_ground_y = natural_h.clamp(1.5, 45.0);
+
+    let yard_size = 14.0_f32;
+    let border = yard_size + 10.0_f32;
+    let min_x_idx = ((house_pos.x - half_w - border) + half_map_w).max(0.0) as u32;
+    let max_x_idx = ((house_pos.x + half_w + border) + half_map_w).min(map.width as f32) as u32;
+    let min_z_idx = ((house_pos.z - half_d - border) + half_map_h).max(0.0) as u32;
+    let max_z_idx = ((house_pos.z + half_d + border) + half_map_h).min(map.height as f32) as u32;
 
     for mz in min_z_idx..max_z_idx {
         for mx in min_x_idx..max_x_idx {
-            map.set_height(mx, mz, 1.5);
+            let wx = mx as f32 - half_map_w;
+            let wz = mz as f32 - half_map_h;
+
+            let dx = ((wx - house_pos.x).abs() - half_w).max(0.0);
+            let dz = ((wz - house_pos.z).abs() - half_d).max(0.0);
+            let dist_edge = dx.max(dz);
+
+            if dist_edge <= yard_size {
+                map.set_height(mx, mz, house_ground_y);
+            } else {
+                let blend_t = ((dist_edge - yard_size) / 10.0).clamp(0.0, 1.0);
+                let orig_h = map.get_height(mx, mz);
+                let blended = house_ground_y * (1.0 - blend_t) + orig_h * blend_t;
+                map.set_height(mx, mz, blended);
+            }
             map.set_biome(mx, mz, Biome::Temperate);
         }
     }
@@ -262,6 +284,138 @@ fn spawn_lantern(
     ));
 }
 
+pub fn create_world_uv_cuboid(size: Vec3, tile_scale: f32) -> Mesh {
+    let hx = size.x * 0.5;
+    let hy = size.y * 0.5;
+    let hz = size.z * 0.5;
+
+    let sx = size.x / tile_scale;
+    let sy = size.y / tile_scale;
+    let sz = size.z / tile_scale;
+
+    let positions = vec![
+        // Front (+Z)
+        [-hx, -hy,  hz], [ hx, -hy,  hz], [ hx,  hy,  hz], [-hx,  hy,  hz],
+        // Back (-Z)
+        [ hx, -hy, -hz], [-hx, -hy, -hz], [-hx,  hy, -hz], [ hx,  hy, -hz],
+        // Top (+Y)
+        [-hx,  hy,  hz], [ hx,  hy,  hz], [ hx,  hy, -hz], [-hx,  hy, -hz],
+        // Bottom (-Y)
+        [-hx, -hy, -hz], [ hx, -hy, -hz], [ hx, -hy,  hz], [-hx, -hy,  hz],
+        // Right (+X)
+        [ hx, -hy,  hz], [ hx, -hy, -hz], [ hx,  hy, -hz], [ hx,  hy,  hz],
+        // Left (-X)
+        [-hx, -hy, -hz], [-hx, -hy,  hz], [-hx,  hy,  hz], [-hx,  hy, -hz],
+    ];
+
+    let normals = vec![
+        [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0],
+        [0.0, 0.0, -1.0], [0.0, 0.0, -1.0], [0.0, 0.0, -1.0], [0.0, 0.0, -1.0],
+        [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0],
+        [0.0, -1.0, 0.0], [0.0, -1.0, 0.0], [0.0, -1.0, 0.0], [0.0, -1.0, 0.0],
+        [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [-1.0, 0.0, 0.0],
+    ];
+
+    let uvs = vec![
+        // Front (+Z)
+        [0.0, sy], [sx, sy], [sx, 0.0], [0.0, 0.0],
+        // Back (-Z)
+        [0.0, sy], [sx, sy], [sx, 0.0], [0.0, 0.0],
+        // Top (+Y)
+        [0.0, 0.0], [sx, 0.0], [sx, sz], [0.0, sz],
+        // Bottom (-Y)
+        [0.0, 0.0], [sx, 0.0], [sx, sz], [0.0, sz],
+        // Right (+X)
+        [0.0, sy], [sz, sy], [sz, 0.0], [0.0, 0.0],
+        // Left (-X)
+        [0.0, sy], [sz, sy], [sz, 0.0], [0.0, 0.0],
+    ];
+
+    let indices = vec![
+        0, 1, 2, 2, 3, 0,
+        4, 5, 6, 6, 7, 4,
+        8, 9, 10, 10, 11, 8,
+        12, 13, 14, 14, 15, 12,
+        16, 17, 18, 18, 19, 16,
+        20, 21, 22, 22, 23, 20,
+    ];
+
+    let mut mesh = Mesh::new(
+        bevy::render::render_resource::PrimitiveTopology::TriangleList,
+        bevy::asset::RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(bevy::render::mesh::Indices::U32(indices));
+    mesh
+}
+
+pub fn create_door_mesh(size: Vec3) -> Mesh {
+    let hx = size.x * 0.5;
+    let hy = size.y * 0.5;
+    let hz = size.z * 0.5;
+
+    let positions = vec![
+        // Front (+Z)
+        [-hx, -hy,  hz], [ hx, -hy,  hz], [ hx,  hy,  hz], [-hx,  hy,  hz],
+        // Back (-Z)
+        [ hx, -hy, -hz], [-hx, -hy, -hz], [-hx,  hy, -hz], [ hx,  hy, -hz],
+        // Top (+Y)
+        [-hx,  hy,  hz], [ hx,  hy,  hz], [ hx,  hy, -hz], [-hx,  hy, -hz],
+        // Bottom (-Y)
+        [-hx, -hy, -hz], [ hx, -hy, -hz], [ hx, -hy,  hz], [-hx, -hy,  hz],
+        // Right (+X)
+        [ hx, -hy,  hz], [ hx, -hy, -hz], [ hx,  hy, -hz], [ hx,  hy,  hz],
+        // Left (-X)
+        [-hx, -hy, -hz], [-hx, -hy,  hz], [-hx,  hy,  hz], [-hx,  hy, -hz],
+    ];
+
+    let normals = vec![
+        [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0],
+        [0.0, 0.0, -1.0], [0.0, 0.0, -1.0], [0.0, 0.0, -1.0], [0.0, 0.0, -1.0],
+        [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0],
+        [0.0, -1.0, 0.0], [0.0, -1.0, 0.0], [0.0, -1.0, 0.0], [0.0, -1.0, 0.0],
+        [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [-1.0, 0.0, 0.0],
+    ];
+
+    let uvs = vec![
+        // Front (+Z): map 0..1 texture right-side up
+        [0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0],
+        // Back (-Z): map 0..1 texture right-side up
+        [0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0],
+        // Top (+Y)
+        [0.0, 0.0], [1.0, 0.0], [1.0, 0.1], [0.0, 0.1],
+        // Bottom (-Y)
+        [0.0, 0.0], [1.0, 0.0], [1.0, 0.1], [0.0, 0.1],
+        // Right (+X)
+        [0.0, 1.0], [0.1, 1.0], [0.1, 0.0], [0.0, 0.0],
+        // Left (-X)
+        [0.0, 1.0], [0.1, 1.0], [0.1, 0.0], [0.0, 0.0],
+    ];
+
+    let indices = vec![
+        0, 1, 2, 2, 3, 0,
+        4, 5, 6, 6, 7, 4,
+        8, 9, 10, 10, 11, 8,
+        12, 13, 14, 14, 15, 12,
+        16, 17, 18, 18, 19, 16,
+        20, 21, 22, 22, 23, 20,
+    ];
+
+    let mut mesh = Mesh::new(
+        bevy::render::render_resource::PrimitiveTopology::TriangleList,
+        bevy::asset::RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(bevy::render::mesh::Indices::U32(indices));
+    mesh
+}
+
 fn spawn_solid_wall(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
@@ -282,7 +436,7 @@ fn spawn_solid_wall(
     };
 
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::from_size(size))),
+        Mesh3d(meshes.add(create_world_uv_cuboid(size, 3.0))),
         MeshMaterial3d(material.clone()),
         Transform::from_translation(pos),
         WallCollider {
@@ -541,8 +695,8 @@ fn spawn_door_wall(
         // Child visual mesh offset to the right by half door width, holding door collider
         let child_id = commands
             .spawn((
-                Mesh3d(meshes.add(Cuboid::from_size(door_size))),
-                MeshMaterial3d(door_mat),
+                Mesh3d(meshes.add(create_door_mesh(door_size))),
+                MeshMaterial3d(door_mat.clone()),
                 Transform::from_xyz(0.8, 0.0, 0.0),
                 HouseDoor {
                     is_open: false,
@@ -562,7 +716,7 @@ fn spawn_door_wall(
         // Vertical door wall (along Z)
         let lp_size = Vec3::new(0.2, 3.5, post_width + 0.1);
         commands.spawn((
-            Mesh3d(meshes.add(Cuboid::from_size(lp_size))),
+            Mesh3d(meshes.add(create_world_uv_cuboid(lp_size, 3.0))),
             MeshMaterial3d(wall_material.clone()),
             Transform::from_translation(
                 pos + Vec3::new(0.0, 0.0, -(cell_size * 0.5 - post_width * 0.5)),
@@ -576,7 +730,7 @@ fn spawn_door_wall(
 
         let rp_size = Vec3::new(0.2, 3.5, post_width + 0.1);
         commands.spawn((
-            Mesh3d(meshes.add(Cuboid::from_size(rp_size))),
+            Mesh3d(meshes.add(create_world_uv_cuboid(rp_size, 3.0))),
             MeshMaterial3d(wall_material.clone()),
             Transform::from_translation(
                 pos + Vec3::new(0.0, 0.0, cell_size * 0.5 - post_width * 0.5),
@@ -590,7 +744,7 @@ fn spawn_door_wall(
 
         let l_size = Vec3::new(0.2, 1.3, door_width);
         commands.spawn((
-            Mesh3d(meshes.add(Cuboid::from_size(l_size))),
+            Mesh3d(meshes.add(create_world_uv_cuboid(l_size, 3.0))),
             MeshMaterial3d(wall_material.clone()),
             Transform::from_translation(pos + Vec3::new(0.0, 1.1, 0.0)),
             HouseMarker,
@@ -623,7 +777,7 @@ fn spawn_door_wall(
         // Child visual mesh offset along Z by half door width, holding door collider
         let child_id = commands
             .spawn((
-                Mesh3d(meshes.add(Cuboid::from_size(door_size))),
+                Mesh3d(meshes.add(create_door_mesh(door_size))),
                 MeshMaterial3d(door_mat),
                 Transform::from_xyz(0.0, 0.0, 0.8),
                 HouseDoor {
@@ -661,30 +815,60 @@ fn spawn_house(
             break;
         }
     }
+    house_pos.y = get_bilinear_height(house_pos.x, house_pos.z, &map);
+
+    let load_repeat_tex = |path: &'static str| -> Handle<Image> {
+        asset_server
+            .load_builder()
+            .with_settings(|settings: &mut bevy::image::ImageLoaderSettings| {
+                settings.sampler =
+                    bevy::image::ImageSampler::Descriptor(bevy::image::ImageSamplerDescriptor {
+                        address_mode_u: bevy::image::ImageAddressMode::Repeat,
+                        address_mode_v: bevy::image::ImageAddressMode::Repeat,
+                        ..default()
+                    });
+            })
+            .load(path)
+    };
 
     // Materials
     let wall_mat = materials.add(StandardMaterial {
-        base_color_texture: Some(asset_server.load("textures/solid_brick.png")),
+        base_color_texture: Some(load_repeat_tex("textures/solid_brick.png")),
         perceptual_roughness: 0.9,
+        cull_mode: None,
+        double_sided: true,
         ..default()
     });
 
     let floor_mat = materials.add(StandardMaterial {
-        base_color_texture: Some(asset_server.load("textures/solid_limestone.png")),
+        base_color_texture: Some(load_repeat_tex("textures/solid_limestone.png")),
         perceptual_roughness: 0.85,
+        cull_mode: None,
+        double_sided: true,
         ..default()
     });
 
-    let basement_stone_mat = materials.add(StandardMaterial {
-        base_color_texture: Some(asset_server.load("textures/solid_stone.png")),
-        perceptual_roughness: 0.95,
+    let basement_floor_mat = materials.add(StandardMaterial {
+        base_color_texture: Some(load_repeat_tex("textures/solid_limestone.png")),
+        perceptual_roughness: 0.85,
+        cull_mode: None,
+        double_sided: true,
+        ..default()
+    });
+
+    let basement_wall_mat = materials.add(StandardMaterial {
+        base_color_texture: Some(load_repeat_tex("textures/rock_wall.png")),
+        perceptual_roughness: 0.9,
+        cull_mode: None,
+        double_sided: true,
         ..default()
     });
 
     let sub_basement_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.5, 0.4, 0.6), // dark tinted
-        base_color_texture: Some(asset_server.load("textures/solid_stone.png")),
-        perceptual_roughness: 0.95,
+        base_color_texture: Some(load_repeat_tex("textures/rock_wall.png")),
+        perceptual_roughness: 0.9,
+        cull_mode: None,
+        double_sided: true,
         ..default()
     });
 
@@ -727,10 +911,11 @@ fn spawn_house(
 
                 // 1. Spawn Floor mesh
                 if cell_type != CellType::Empty {
+                    let y_floor = if floor == 1 { y_base + 0.02 } else { y_base };
                     commands.spawn((
                         Mesh3d(meshes.add(Cuboid::new(cell_size, 0.1, cell_size))),
                         MeshMaterial3d(floor_mat.clone()),
-                        Transform::from_xyz(x_center, y_base, z_center),
+                        Transform::from_xyz(x_center, y_floor, z_center),
                         RigidBody::Static,
                         Collider::cuboid(cell_size, 0.1, cell_size),
                         HouseMarker,
@@ -923,22 +1108,14 @@ fn spawn_house(
                             cell_size,
                         );
 
-                        // Smooth Front Entrance Threshold Apron Ramp
-                        let ramp_pos = Vec3::new(x_center, 1.52, house_pos.z + half_d + 0.6);
+                        // Front Entrance Patio Apron (flush with terrain and house floor)
+                        let z_door = house_pos.z + half_d;
                         commands.spawn((
-                            Mesh3d(meshes.add(Cuboid::new(3.6, 0.12, 1.2))),
-                            MeshMaterial3d(materials.add(StandardMaterial {
-                                base_color: Color::srgb(0.4, 0.42, 0.45),
-                                perceptual_roughness: 0.8,
-                                ..default()
-                            })),
-                            Transform::from_translation(ramp_pos)
-                                .with_rotation(Quat::from_rotation_x(-0.08)),
+                            Mesh3d(meshes.add(Cuboid::new(5.0, 0.1, 3.0))),
+                            MeshMaterial3d(floor_mat.clone()),
+                            Transform::from_xyz(x_center, house_pos.y + 0.02, z_door + 1.5),
                             RigidBody::Static,
-                            Collider::cuboid(3.6, 0.12, 1.2),
-                            WallCollider {
-                                half_extents: Vec3::new(1.8, 0.06, 0.6),
-                            },
+                            Collider::cuboid(5.0, 0.1, 3.0),
                             HouseMarker,
                             PlayModeEntity,
                         ));
@@ -1111,11 +1288,10 @@ fn spawn_house(
     // -----------------------------------------------------------------
     let basement_w = (grid_cols as f32 * cell_size) + 4.0;
     let basement_d = (grid_rows as f32 * cell_size) + 4.0;
-
-    // Floor
+    let bf_size = Vec3::new(basement_w, 0.1, basement_d);
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(basement_w, 0.1, basement_d))),
-        MeshMaterial3d(basement_stone_mat.clone()),
+        Mesh3d(meshes.add(create_world_uv_cuboid(bf_size, 3.0))),
+        MeshMaterial3d(basement_floor_mat.clone()),
         Transform::from_xyz(house_pos.x, -50.0, house_pos.z),
         RigidBody::Static,
         Collider::cuboid(basement_w, 0.1, basement_d),
@@ -1125,8 +1301,8 @@ fn spawn_house(
 
     // Ceiling
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(basement_w, 0.1, basement_d))),
-        MeshMaterial3d(basement_stone_mat.clone()),
+        Mesh3d(meshes.add(create_world_uv_cuboid(bf_size, 3.0))),
+        MeshMaterial3d(basement_floor_mat.clone()),
         Transform::from_xyz(house_pos.x, -46.0, house_pos.z),
         RigidBody::Static,
         Collider::cuboid(basement_w, 0.1, basement_d),
@@ -1135,9 +1311,12 @@ fn spawn_house(
     ));
 
     // Outer Walls
+    let bw_size = Vec3::new(basement_w, 4.0, 0.2);
+    let bd_size = Vec3::new(0.2, 4.0, basement_d);
+
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(basement_w, 4.0, 0.2))),
-        MeshMaterial3d(basement_stone_mat.clone()),
+        Mesh3d(meshes.add(create_world_uv_cuboid(bw_size, 3.0))),
+        MeshMaterial3d(basement_wall_mat.clone()),
         Transform::from_xyz(house_pos.x, -48.0, house_pos.z - (basement_d * 0.5)),
         WallCollider {
             half_extents: Vec3::new(basement_w * 0.5, 2.0, 0.1),
@@ -1146,8 +1325,8 @@ fn spawn_house(
         PlayModeEntity,
     ));
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(basement_w, 4.0, 0.2))),
-        MeshMaterial3d(basement_stone_mat.clone()),
+        Mesh3d(meshes.add(create_world_uv_cuboid(bw_size, 3.0))),
+        MeshMaterial3d(basement_wall_mat.clone()),
         Transform::from_xyz(house_pos.x, -48.0, house_pos.z + (basement_d * 0.5)),
         WallCollider {
             half_extents: Vec3::new(basement_w * 0.5, 2.0, 0.1),
@@ -1156,8 +1335,8 @@ fn spawn_house(
         PlayModeEntity,
     ));
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(0.2, 4.0, basement_d))),
-        MeshMaterial3d(basement_stone_mat.clone()),
+        Mesh3d(meshes.add(create_world_uv_cuboid(bd_size, 3.0))),
+        MeshMaterial3d(basement_wall_mat.clone()),
         Transform::from_xyz(house_pos.x + (basement_w * 0.5), -48.0, house_pos.z),
         WallCollider {
             half_extents: Vec3::new(0.1, 2.0, basement_d * 0.5),
@@ -1166,8 +1345,8 @@ fn spawn_house(
         PlayModeEntity,
     ));
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(0.2, 4.0, basement_d))),
-        MeshMaterial3d(basement_stone_mat.clone()),
+        Mesh3d(meshes.add(create_world_uv_cuboid(bd_size, 3.0))),
+        MeshMaterial3d(basement_wall_mat.clone()),
         Transform::from_xyz(house_pos.x - (basement_w * 0.5), -48.0, house_pos.z),
         WallCollider {
             half_extents: Vec3::new(0.1, 2.0, basement_d * 0.5),
@@ -1273,9 +1452,10 @@ fn spawn_house(
     }
 
     // Vault partition wall separating cellar and Crypt ladder room
+    let vp1_size = Vec3::new(8.0, 4.0, 0.2);
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(8.0, 4.0, 0.2))),
-        MeshMaterial3d(basement_stone_mat.clone()),
+        Mesh3d(meshes.add(create_world_uv_cuboid(vp1_size, 3.0))),
+        MeshMaterial3d(basement_wall_mat.clone()),
         Transform::from_xyz(house_pos.x - 6.0, -48.0, house_pos.z),
         WallCollider {
             half_extents: Vec3::new(4.0, 2.0, 0.1),
@@ -1284,8 +1464,8 @@ fn spawn_house(
         PlayModeEntity,
     ));
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(8.0, 4.0, 0.2))),
-        MeshMaterial3d(basement_stone_mat.clone()),
+        Mesh3d(meshes.add(create_world_uv_cuboid(vp1_size, 3.0))),
+        MeshMaterial3d(basement_wall_mat.clone()),
         Transform::from_xyz(house_pos.x + 6.0, -48.0, house_pos.z),
         WallCollider {
             half_extents: Vec3::new(4.0, 2.0, 0.1),
@@ -1293,9 +1473,10 @@ fn spawn_house(
         HouseMarker,
         PlayModeEntity,
     ));
+    let vp2_size = Vec3::new(4.0, 1.2, 0.2);
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(4.0, 1.2, 0.2))),
-        MeshMaterial3d(basement_stone_mat.clone()),
+        Mesh3d(meshes.add(create_world_uv_cuboid(vp2_size, 3.0))),
+        MeshMaterial3d(basement_wall_mat.clone()),
         Transform::from_xyz(house_pos.x, -46.6, house_pos.z),
         WallCollider {
             half_extents: Vec3::new(2.0, 0.6, 0.1),
@@ -1350,9 +1531,10 @@ fn spawn_house(
     // -----------------------------------------------------------------
 
     // Floor
+    let sb_f_size = Vec3::new(10.0, 0.1, 10.0);
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(10.0, 0.1, 10.0))),
-        MeshMaterial3d(sub_basement_mat.clone()),
+        Mesh3d(meshes.add(create_world_uv_cuboid(sb_f_size, 3.0))),
+        MeshMaterial3d(basement_floor_mat.clone()),
         Transform::from_xyz(house_pos.x, -100.0, house_pos.z),
         RigidBody::Static,
         Collider::cuboid(10.0, 0.1, 10.0),
@@ -1362,8 +1544,8 @@ fn spawn_house(
 
     // Ceiling
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(10.0, 0.1, 10.0))),
-        MeshMaterial3d(sub_basement_mat.clone()),
+        Mesh3d(meshes.add(create_world_uv_cuboid(sb_f_size, 3.0))),
+        MeshMaterial3d(basement_floor_mat.clone()),
         Transform::from_xyz(house_pos.x, -96.0, house_pos.z),
         RigidBody::Static,
         Collider::cuboid(10.0, 0.1, 10.0),
@@ -1372,8 +1554,11 @@ fn spawn_house(
     ));
 
     // Outer Walls
+    let sb_w1_size = Vec3::new(10.0, 4.0, 0.2);
+    let sb_w2_size = Vec3::new(0.2, 4.0, 10.0);
+
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(10.0, 4.0, 0.2))),
+        Mesh3d(meshes.add(create_world_uv_cuboid(sb_w1_size, 3.0))),
         MeshMaterial3d(sub_basement_mat.clone()),
         Transform::from_xyz(house_pos.x, -98.0, house_pos.z - 5.0),
         WallCollider {
@@ -1383,7 +1568,7 @@ fn spawn_house(
         PlayModeEntity,
     ));
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(10.0, 4.0, 0.2))),
+        Mesh3d(meshes.add(create_world_uv_cuboid(sb_w1_size, 3.0))),
         MeshMaterial3d(sub_basement_mat.clone()),
         Transform::from_xyz(house_pos.x, -98.0, house_pos.z + 5.0),
         WallCollider {
@@ -1393,7 +1578,7 @@ fn spawn_house(
         PlayModeEntity,
     ));
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(0.2, 4.0, 10.0))),
+        Mesh3d(meshes.add(create_world_uv_cuboid(sb_w2_size, 3.0))),
         MeshMaterial3d(sub_basement_mat.clone()),
         Transform::from_xyz(house_pos.x + 5.0, -98.0, house_pos.z),
         WallCollider {
@@ -1403,7 +1588,7 @@ fn spawn_house(
         PlayModeEntity,
     ));
     commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(0.2, 4.0, 10.0))),
+        Mesh3d(meshes.add(create_world_uv_cuboid(sb_w2_size, 3.0))),
         MeshMaterial3d(sub_basement_mat.clone()),
         Transform::from_xyz(house_pos.x - 5.0, -98.0, house_pos.z),
         WallCollider {
@@ -1434,7 +1619,7 @@ fn spawn_house(
     // Pedestal
     commands.spawn((
         Mesh3d(meshes.add(Cylinder::new(0.35, 1.2))),
-        MeshMaterial3d(basement_stone_mat.clone()),
+        MeshMaterial3d(basement_wall_mat.clone()),
         Transform::from_xyz(house_pos.x, -99.4, house_pos.z),
         ArtifactPedestal,
         WallCollider {
@@ -1657,15 +1842,63 @@ fn bookcase_slide_system(
     }
 }
 
-fn door_swing_system(time: Res<Time>, mut query: Query<(&mut Transform, &HouseDoor)>) {
+fn door_swing_system(
+    time: Res<Time>,
+    player_query: Query<&Transform, With<PlayModePlayer>>,
+    mut door_query: Query<
+        (Entity, &mut Transform, &mut HouseDoor, Option<&Children>),
+        Without<PlayModePlayer>,
+    >,
+    children_query: Query<&Children>,
+) {
     let dt = time.delta_secs();
-    for (mut transform, door) in query.iter_mut() {
-        let target_rot = if door.is_open {
-            door.open_rot
-        } else {
-            door.closed_rot
-        };
-        transform.rotation = transform.rotation.slerp(target_rot, 5.0 * dt);
+    let player_pos = player_query
+        .iter()
+        .next()
+        .map(|t| t.translation)
+        .unwrap_or(Vec3::ZERO);
+
+    // Pre-pass: collect auto-open triggers for parent hinges near player
+    let mut auto_open_parents = Vec::new();
+    for (parent_entity, transform, door, children_opt) in door_query.iter() {
+        if children_opt.is_some() {
+            let dist = player_pos.xz().distance(transform.translation.xz());
+            let dy = (player_pos.y - transform.translation.y).abs();
+            if dist < 2.8 && dy < 2.5 && !door.is_open {
+                auto_open_parents.push(parent_entity);
+            }
+        }
+    }
+
+    for parent_entity in auto_open_parents {
+        if let Ok((_, _, mut door, _)) = door_query.get_mut(parent_entity) {
+            door.is_open = true;
+        }
+    }
+
+    // Pass 1: Rotate parent hinge transforms (With<Children>)
+    let mut parent_states = Vec::new();
+    for (entity, mut transform, door, children_opt) in door_query.iter_mut() {
+        if children_opt.is_some() {
+            let target_rot = if door.is_open {
+                door.open_rot
+            } else {
+                door.closed_rot
+            };
+            transform.rotation = transform.rotation.slerp(target_rot, 5.0 * dt);
+            parent_states.push((entity, door.is_open));
+        }
+    }
+
+    // Pass 2: Sync is_open state to child door components
+    for (parent_entity, is_open) in parent_states {
+        if let Ok(children) = children_query.get(parent_entity) {
+            for child_entity in children.iter() {
+                if let Ok((_, _, mut child_door, _)) = door_query.get_mut(child_entity) {
+                    child_door.is_open = is_open;
+                }
+            }
+        }
     }
 }
 

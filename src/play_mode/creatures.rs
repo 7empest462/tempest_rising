@@ -1,8 +1,12 @@
 use crate::map_editor::data::TempestMap;
 use crate::play_mode::{
-    PlayModeEntity, PlayModePlayer, get_bilinear_height, get_effective_floor_height, nav,
+    Bullet, PlayModeEntity, PlayModePlayer, PlayParticle, get_bilinear_height,
+    get_effective_floor_height, nav,
 };
 use bevy::animation::prelude::*;
+
+// WallColliderQuery alias removed in favor of explicit `Query` usage in systems.
+
 use bevy::gltf::GltfAssetLabel;
 use bevy::prelude::WorldAssetRoot;
 use bevy::prelude::*;
@@ -1943,14 +1947,21 @@ pub fn creature_ai_system(
                 }
 
                 if let Some((_target_entity, target_pos, target_dist)) = nearest_hostile {
-                    // Combat mode — chase and attack the hostile
-                    creature.yaw = (target_pos - creature.position)
-                        .normalize_or_zero()
-                        .z
-                        .atan2((target_pos - creature.position).normalize_or_zero().x);
+                    // Combat mode — prefer ranged fire first, then melee only if too close.
+                    let to_target = (target_pos - creature.position).normalize_or_zero();
+                    creature.yaw = to_target.z.atan2(to_target.x);
+                    let melee_range = 2.0;
+                    let fire_range = 8.0;
+                    let can_fire = target_dist <= melee_range
+                        || (target_dist <= fire_range
+                            && nav::has_clear_line(
+                                creature.position,
+                                target_pos,
+                                0.35,
+                                &colliders,
+                            ));
 
-                    if target_dist < 2.0 {
-                        // In attack range
+                    if can_fire {
                         creature.state = CreatureState::Attacking;
                         creature.velocity = Vec3::ZERO;
                     } else {
@@ -2191,20 +2202,30 @@ pub fn creature_ai_system(
 
 /// Separate system so the trilobite can mutably access other creatures for damage.
 /// Runs after creature_ai_system sets Attacking state + positions.
-pub fn trilobite_combat_system(mut creature_query: Query<(Entity, &mut PlayCreature, &Transform)>) {
+#[allow(clippy::type_complexity)]
+pub fn trilobite_combat_system(
+    mut commands: Commands,
+    mut creature_query: Query<(Entity, &mut PlayCreature, &Transform)>,
+    collider_query: Query<
+        (Entity, &crate::play_mode::WallCollider, &GlobalTransform),
+        (Without<PlayModePlayer>, Without<PlayCreature>),
+    >,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
     // First pass: collect attacking trilobites and their targets
-    let mut attacks: Vec<(Entity, Vec3)> = Vec::new();
+    let mut attacks: Vec<(Entity, Vec3, Vec3)> = Vec::new();
     for (entity, creature, _transform) in creature_query.iter() {
         if creature.creature_type == CreatureType::RobotTrilobite
             && creature.state == CreatureState::Attacking
             && creature.attack_cooldown <= 0.0
         {
-            attacks.push((entity, creature.position));
+            attacks.push((entity, creature.position, Vec3::ZERO));
         }
     }
 
     // Second pass: for each attacking trilobite, find & damage the nearest hostile
-    for (trilo_entity, trilo_pos) in attacks {
+    for (trilo_entity, trilo_pos, _) in attacks {
         let mut best_target: Option<(Entity, f32)> = None;
         for (other_entity, other_creature, _) in creature_query.iter() {
             if other_entity == trilo_entity {
@@ -2224,6 +2245,88 @@ pub fn trilobite_combat_system(mut creature_query: Query<(Entity, &mut PlayCreat
         }
 
         if let Some((target_entity, _)) = best_target {
+            let target_pos = if let Ok((_, _, target_transform)) = creature_query.get(target_entity)
+            {
+                target_transform.translation
+            } else {
+                trilo_pos
+            };
+            let target_distance = trilo_pos.distance(target_pos);
+            let melee_range = 2.0;
+            let colliders: Vec<(Vec3, Vec3, bool)> = collider_query
+                .iter()
+                .map(|(_, collider, col_transform)| {
+                    let is_open = false;
+                    (col_transform.translation(), collider.half_extents, is_open)
+                })
+                .collect();
+
+            if target_distance > melee_range
+                && nav::has_clear_line(trilo_pos, target_pos, 0.35, &colliders)
+            {
+                // Spawn a fast visible tracer from the trilobite toward the target
+                if let Ok((_, _, trilo_transform)) = creature_query.get(trilo_entity) {
+                    let target_pos = creature_query
+                        .get(target_entity)
+                        .ok()
+                        .map(|(_, _, t)| t.translation)
+                        .unwrap_or(trilo_transform.translation);
+                    let shoot_dir = (target_pos - trilo_transform.translation).normalize_or_zero();
+                    let barrel_right = trilo_transform.right();
+                    let barrel_offsets = [0.18, -0.18];
+
+                    let tracer_mesh = meshes.add(Sphere::new(0.08));
+                    let tracer_mat = materials.add(StandardMaterial {
+                        base_color: Color::srgb(0.9, 0.85, 0.3),
+                        emissive: LinearRgba::from(Color::srgb(0.9, 0.85, 0.3)) * 8.0,
+                        perceptual_roughness: 0.2,
+                        ..default()
+                    });
+
+                    for offset in barrel_offsets {
+                        let start_pos = trilo_transform.translation
+                            + shoot_dir * 0.8
+                            + trilo_transform.up() * 0.25
+                            + barrel_right * offset;
+
+                        commands.spawn((
+                            Mesh3d(tracer_mesh.clone()),
+                            MeshMaterial3d(tracer_mat.clone()),
+                            Transform::from_translation(start_pos),
+                            Bullet {
+                                velocity: shoot_dir * 130.0,
+                                gravity: 0.0,
+                                lifetime: 0.25,
+                                damage: 0.0,
+                            },
+                            PlayModeEntity,
+                        ));
+
+                        let flash_mesh = meshes.add(Sphere::new(0.06).mesh().ico(2).unwrap());
+                        let flash_mat = materials.add(StandardMaterial {
+                            base_color: Color::srgb(1.0, 0.8, 0.2),
+                            emissive: LinearRgba::from(Color::srgb(1.0, 0.8, 0.2)) * 12.0,
+                            unlit: true,
+                            alpha_mode: AlphaMode::Blend,
+                            ..default()
+                        });
+
+                        commands.spawn((
+                            Mesh3d(flash_mesh),
+                            MeshMaterial3d(flash_mat),
+                            Transform::from_translation(start_pos),
+                            PlayParticle {
+                                velocity: shoot_dir * 6.0 + Vec3::Y * 1.0,
+                                lifetime: 0.0,
+                                max_lifetime: 0.12,
+                                color: Color::srgb(1.0, 0.8, 0.2),
+                            },
+                            PlayModeEntity,
+                        ));
+                    }
+                }
+            }
+
             // Deal damage to the hostile
             if let Ok((_, mut target, _)) = creature_query.get_mut(target_entity) {
                 target.health = (target.health - 12.0).max(0.0);

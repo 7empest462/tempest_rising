@@ -11,6 +11,19 @@
 
 ## ✨ Features & Highlights
 
+### 🎨 4K AI Upscaled Textures & Double-Sided Rendering
+* **Upscayl Neural AI Enhancement**: All mansion, basement, wall, and door textures processed via the **Upscayl** AI engine (`ultrasharp-4x`) on Apple M4 GPU up to **4096 x 4096 (4K)** resolution.
+* **4K Limestone & Rock Wall Environments**: High-definition 4K Limestone floors and ceilings, 4K Rock Walls, 4K Brick Facades, 4K Wood Planks, and 4K Vault/Wooden Doors.
+* **Double-Sided Shader Illumination**: Double-sided rendering (`cull_mode: None`) ensures all subterranean ceilings, floors, and walls illuminate brightly from any interior or spectator angle.
+
+### 🕳️ Full-Map Subterranean Cave Maze & Dual Minimap
+* **Border-to-Border Subterranean Network**: Procedural cave maze expanded across 100% of the world grid featuring 9 spacious caverns, bioluminescent crystal nodes, entrance hubs, and recursive backtracker corridors.
+* **Real-Time Dual-Layer Minimap**: Context-aware minimap automatically switches between surface world map and subterranean cave maze map, tracking player pointer and companion locations 1:1.
+
+### 🏡 Spacious Mansion Yard & Intelligent Auto Step-Up
+* **14-Meter Level Lawn**: Mansion surrounded by a flat 14-meter green lawn with smooth 10-meter gradient terrain blending.
+* **Auto Step-Up Controller**: Intelligent movement system automatically steps up over patio platforms, doorway ledges, and stair steps (up to 0.45m / 18in) without jumping.
+
 ### 🦊 Fox Domestication & Companion Defenders
 * **Individual Animal Friendship**: Approach wild foxes and offer treats (`T` key) to build friendship step-by-step (1/3 ❤️, 2/3 ❤️, 3/3 ❤️).
 * **Named Loyal Pets**: Domesticated foxes receive unique individual names (*Sparky, Ember, Jasper, Rusty, Pippin...*) and wear glowing golden companion collars!
@@ -19,8 +32,8 @@
 ### 🚀 Exploration & Physics Engine
 * **Seamless Camera Views**: Switch dynamically between **Third-Person**, **First-Person**, and **Orbit/Spectator** camera modes (`V` key).
 * **Verlet Ragdoll Physics**: Collapse into floppy ragdoll physics anytime (`G` key) or tumble down steep mountain cliffs with dynamic recovery.
-* **GPU Water Compute & Swimming**: Buoyant swimming system with turbo sprint, deep diving (`C` / `Ctrl`), surfacing, and real-time splash dynamics.
-* **Underground Cave System**: Descend into subterranean caverns with ladders, mine bioluminescent crystal nodes, and discover Ancient Coffers.
+* **GPU Water Compute & Smooth Landing**: Buoyant swimming system with turbo sprint, deep diving (`C` / `Ctrl`), smooth flight suit water landing, and real-time splash dynamics.
+* **Gentle Beach Shoreline Gradient**: Smooth 8-meter beach slope transition from ocean water to dry land.
 
 ### 🌌 Cosmic Skybox & Celestial Bodies
 * **Binary Suns**: Golden Sun and Cyan Sun illuminating twilight alien horizons.

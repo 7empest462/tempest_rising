@@ -37,6 +37,9 @@ pub struct CaveHeadlamp;
 pub struct CaveSystemData {
     pub surface_entrances: Vec<Vec3>,
     pub cave_spawns: Vec<Vec3>,
+    pub grid_cols: usize,
+    pub grid_rows: usize,
+    pub grid: Vec<Vec<u8>>,
 }
 
 pub struct CavePlugin;
@@ -57,8 +60,8 @@ impl Plugin for CavePlugin {
 
 pub const CAVE_FLOOR_Y: f32 = -150.0;
 pub const CAVE_CEILING_Y: f32 = -142.0; // Vaulted 8.0m height
-pub const CAVE_GRID_COLS: usize = 36;
-pub const CAVE_GRID_ROWS: usize = 36;
+pub const _CAVE_GRID_COLS: usize = 36;
+pub const _CAVE_GRID_ROWS: usize = 36;
 pub const CAVE_CELL_SIZE: f32 = 4.0;
 
 /// Generates and spawns the 3D underground cave maze level at Y = -150.0
@@ -122,38 +125,59 @@ pub fn setup_underground_cave_system(
         }
     }
 
-    // Carve 4 Spacious Entrance Hubs (5x5 open halls) around all spawn points
-    let entrance_chamber_indices = [(3, 3), (32, 3), (3, 32), (32, 32)];
-    for (ec, er) in entrance_chamber_indices {
+    // Carve 4 Spacious Entrance Hubs (5x5 open halls) distributed across the ENTIRE map
+    let c1 = (grid_cols / 6).clamp(3, grid_cols - 4);
+    let c2 = (5 * grid_cols / 6).clamp(3, grid_cols - 4);
+    let r1 = (grid_rows / 6).clamp(3, grid_rows - 4);
+    let r2 = (5 * grid_rows / 6).clamp(3, grid_rows - 4);
+
+    let entrance_chamber_indices = [(c1, r1), (c2, r1), (c1, r2), (c2, r2)];
+    for &(ec, er) in &entrance_chamber_indices {
         for dc in -2..=2 {
             for dr in -2..=2 {
-                let nc = (ec as i32 + dc).clamp(1, CAVE_GRID_COLS as i32 - 2) as usize;
-                let nr = (er as i32 + dr).clamp(1, CAVE_GRID_ROWS as i32 - 2) as usize;
+                let nc = (ec as i32 + dc).clamp(1, grid_cols as i32 - 2) as usize;
+                let nr = (er as i32 + dr).clamp(1, grid_rows as i32 - 2) as usize;
                 grid[nc][nr] = 2; // Spacious Entrance Hub
             }
         }
         // Connect Entrance Hubs with cardinal corridors into the main maze
-        for i in 1..=4 {
-            grid[(ec as i32 + i).clamp(1, CAVE_GRID_COLS as i32 - 2) as usize][er] = 1;
-            grid[(ec as i32 - i).clamp(1, CAVE_GRID_COLS as i32 - 2) as usize][er] = 1;
-            grid[ec][(er as i32 + i).clamp(1, CAVE_GRID_ROWS as i32 - 2) as usize] = 1;
-            grid[ec][(er as i32 - i).clamp(1, CAVE_GRID_ROWS as i32 - 2) as usize] = 1;
+        for i in 1..=6 {
+            grid[(ec as i32 + i).clamp(1, grid_cols as i32 - 2) as usize][er] = 1;
+            grid[(ec as i32 - i).clamp(1, grid_cols as i32 - 2) as usize][er] = 1;
+            grid[ec][(er as i32 + i).clamp(1, grid_rows as i32 - 2) as usize] = 1;
+            grid[ec][(er as i32 - i).clamp(1, grid_rows as i32 - 2) as usize] = 1;
         }
     }
 
-    // Carve 6 Large Subterranean Caverns into the maze
-    let chamber_centers = [(10, 10), (25, 10), (10, 25), (25, 25), (18, 18), (18, 8)];
+    // Carve 9 Large Subterranean Caverns across the full grid
+    let cm = grid_cols / 2;
+    let rm = grid_rows / 2;
+    let chamber_centers = [
+        (grid_cols / 4, grid_rows / 4),
+        (3 * grid_cols / 4, grid_rows / 4),
+        (grid_cols / 4, 3 * grid_rows / 4),
+        (3 * grid_cols / 4, 3 * grid_rows / 4),
+        (cm, rm),
+        (cm, grid_rows / 4),
+        (cm, 3 * grid_rows / 4),
+        (grid_cols / 4, rm),
+        (3 * grid_cols / 4, rm),
+    ];
     for (cc, cr) in chamber_centers {
         for dc in -3..=3 {
             for dr in -3..=3 {
-                let nc = (cc + dc).clamp(1, grid_cols as i32 - 2) as usize;
-                let nr = (cr + dr).clamp(1, grid_rows as i32 - 2) as usize;
+                let nc = (cc as i32 + dc).clamp(1, grid_cols as i32 - 2) as usize;
+                let nr = (cr as i32 + dr).clamp(1, grid_rows as i32 - 2) as usize;
                 grid[nc][nr] = 2; // Cavern
             }
         }
     }
 
     // 2. Materials & Meshes for Underground World
+    cave_data.grid_cols = grid_cols;
+    cave_data.grid_rows = grid_rows;
+    cave_data.grid = grid.clone();
+
     let cave_rock_texture = asset_server.load("textures/rock.png");
 
     let wall_mat = materials.add(StandardMaterial {
@@ -578,22 +602,32 @@ fn spawn_surface_cave_entrance(
 
     let boulder_mesh = meshes.add(Sphere::new(1.0).mesh().ico(3).unwrap());
 
-    // Dark cavern interior backdrop
+    // Dark cavern interior backdrop & solid back wall
     commands.spawn((
         Mesh3d(boulder_mesh.clone()),
         MeshMaterial3d(dark_interior_mat),
         Transform::from_translation(pos + Vec3::new(0.0, 1.6, -0.4))
             .with_scale(Vec3::new(1.6, 1.4, 1.0)),
+        avian3d::prelude::RigidBody::Static,
+        avian3d::prelude::Collider::cuboid(3.2, 2.8, 1.0),
+        crate::play_mode::WallCollider {
+            half_extents: Vec3::new(1.6, 1.4, 0.5),
+        },
         PlayModeEntity,
     ));
 
-    // Surrounding natural rock formations
+    // Surrounding natural rock formations (Left, Right, Top Arch)
     commands.spawn((
         Mesh3d(boulder_mesh.clone()),
         MeshMaterial3d(rock_mat.clone()),
         Transform::from_translation(pos + Vec3::new(-1.6, 1.2, -0.2))
             .with_scale(Vec3::new(1.4, 1.8, 1.3))
             .with_rotation(Quat::from_rotation_y(0.4)),
+        avian3d::prelude::RigidBody::Static,
+        avian3d::prelude::Collider::cuboid(1.4, 1.8, 1.3),
+        crate::play_mode::WallCollider {
+            half_extents: Vec3::new(0.7, 0.9, 0.65),
+        },
         PlayModeEntity,
     ));
     commands.spawn((
@@ -602,6 +636,11 @@ fn spawn_surface_cave_entrance(
         Transform::from_translation(pos + Vec3::new(1.6, 1.3, -0.2))
             .with_scale(Vec3::new(1.5, 1.9, 1.4))
             .with_rotation(Quat::from_rotation_y(-0.5)),
+        avian3d::prelude::RigidBody::Static,
+        avian3d::prelude::Collider::cuboid(1.5, 1.9, 1.4),
+        crate::play_mode::WallCollider {
+            half_extents: Vec3::new(0.75, 0.95, 0.7),
+        },
         PlayModeEntity,
     ));
     commands.spawn((
@@ -610,6 +649,11 @@ fn spawn_surface_cave_entrance(
         Transform::from_translation(pos + Vec3::new(0.0, 3.1, 0.1))
             .with_scale(Vec3::new(2.2, 1.3, 1.5))
             .with_rotation(Quat::from_rotation_z(0.1)),
+        avian3d::prelude::RigidBody::Static,
+        avian3d::prelude::Collider::cuboid(2.2, 1.3, 1.5),
+        crate::play_mode::WallCollider {
+            half_extents: Vec3::new(1.1, 0.65, 0.75),
+        },
         PlayModeEntity,
     ));
     commands.spawn((

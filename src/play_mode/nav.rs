@@ -442,7 +442,7 @@ fn simplify_path(
 }
 
 /// Checks if a straight line between two points is clear of wall colliders.
-fn has_clear_line(
+pub fn has_clear_line(
     from: Vec3,
     to: Vec3,
     creature_radius: f32,

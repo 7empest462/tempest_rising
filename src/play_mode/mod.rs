@@ -120,6 +120,9 @@ impl Plugin for PlayModePlugin {
 #[derive(Component)]
 pub struct PlayModeEntity;
 
+#[derive(Component)]
+pub struct PlayRagdollCollider;
+
 #[derive(Component, Default)]
 pub struct AmmoDrop {
     pub ammo_pistol: u32,
@@ -526,6 +529,7 @@ pub struct PlayModePlayer {
     pub nodes: Vec<PlayVerletNode>,
     pub constraints: Vec<PlayVerletConstraint>,
     pub height: f32,
+    pub ragdoll_colliders: Vec<bevy::prelude::Entity>,
     pub weight: f32,
     pub head_scale: f32,
     pub axe_swing_timer: Option<f32>, // Some(time_elapsed)
@@ -1406,11 +1410,11 @@ fn setup_play_mode(
             continue;
         }
 
-        let p_pos = Vec3::from_array(p.position);
+        let mut p_pos = Vec3::from_array(p.position);
 
-        // Skip spawning if it overlaps the house footprint
-        let inside = (p_pos.x - house_pos.x).abs() < half_w + 1.0
-            && (p_pos.z - house_pos.z).abs() < half_d + 1.0;
+        // Skip spawning if it overlaps the house footprint or porch
+        let inside = (p_pos.x - house_pos.x).abs() < half_w + 3.5
+            && (p_pos.z - house_pos.z).abs() < half_d + 3.5;
         if inside {
             continue;
         }
@@ -1482,7 +1486,8 @@ fn setup_play_mode(
                 parent,
             );
         } else {
-            // Natural resource node
+            // Natural resource node — snap Y position to updated terrain height to prevent floating nodes
+            p_pos.y = get_bilinear_height(p_pos.x, p_pos.z, &map);
             let node_parent = spawn_play_prefab(
                 &mut commands,
                 &mut meshes,
@@ -2134,6 +2139,7 @@ fn setup_play_mode(
                 nodes: nodes.clone(),
                 constraints,
                 height: h_scale,
+                ragdoll_colliders: Vec::new(),
                 weight: w_thick,
                 head_scale,
                 axe_swing_timer: None,
@@ -2466,8 +2472,14 @@ fn get_floor_and_ceiling(pos: Vec3, terrain_y: f32) -> (f32, f32) {
 
         let half_w = (cols as f32 * cell_size) * 0.5;
         let half_d = (rows as f32 * cell_size) * 0.5;
+        let apron_w = half_w + 14.0;
+        let apron_d = half_d + 14.0;
+        let near_mansion =
+            (pos.x - house_pos_x).abs() < apron_w && (pos.z - house_pos_z).abs() < apron_d;
         let inside_mansion =
             (pos.x - house_pos_x).abs() < half_w && (pos.z - house_pos_z).abs() < half_d;
+        let house_ground_y = terrain_y.clamp(1.5, 45.0);
+
         if inside_mansion {
             let rel_x = pos.x - (house_pos_x - half_w);
             let rel_z = pos.z - (house_pos_z - half_d);
@@ -2479,18 +2491,22 @@ fn get_floor_and_ceiling(pos: Vec3, terrain_y: f32) -> (f32, f32) {
             let near_staircase = (pos.x - staircase_x).abs() < (cell_size * 0.7);
 
             if is_foyer_hole {
-                if near_staircase && pos.y > 1.4 && pos.y < 5.1 {
-                    (pos.y, 8.5)
+                if near_staircase && pos.y > house_ground_y - 0.1 && pos.y < house_ground_y + 3.6 {
+                    (pos.y, house_ground_y + 7.0)
                 } else {
-                    (1.5, 8.5)
+                    (house_ground_y + 0.07, house_ground_y + 7.0)
                 }
-            } else if pos.y > 3.25 {
+            } else if pos.y > house_ground_y + 2.5 {
                 // On the second floor (floor 2)
-                (5.0, 8.5) // floor at 5.0, ceiling at 8.5 (5.0 + 3.5)
+                (house_ground_y + 3.5, house_ground_y + 7.0)
             } else {
                 // On the ground floor (floor 1)
-                (1.5, 5.0) // floor at 1.5, ceiling at 5.0
+                (house_ground_y + 0.07, house_ground_y + 3.5)
             }
+        } else if near_mansion {
+            // Extended 3.0m foundation apron around the ENTIRE mansion perimeter (all 4 sides)
+            // Ensures smooth, continuous floor height when stepping on/off from any angle
+            (house_ground_y + 0.07, f32::MAX)
         } else {
             (terrain_y, f32::MAX) // Outdoors — no ceiling
         }
@@ -3013,12 +3029,40 @@ fn player_movement_and_ragdoll_system(
             player.position.x = player_transform.translation.x;
             player.position.z = player_transform.translation.z;
             player_transform.rotation = Quat::from_rotation_y(-player.rotation_yaw);
-            let ground_y = get_effective_floor_height(player.position, terrain_y);
+            let current_ground_y = get_effective_floor_height(player.position, terrain_y);
+            let updated_target_y = player_transform.translation.y - float_height;
+            let is_airborne = if let Ok(vel) = velocity_query.get(_player_entity) {
+                vel.y.abs() > 0.15 || (updated_target_y - current_ground_y) > 0.05
+            } else {
+                (updated_target_y - current_ground_y) > 0.05
+            };
+
+            // Auto Step-Up Assistance: sample ground height 0.35m AHEAD in walking direction to step onto ledges/patio/stairs (never fires while standing still or walking on flat floors)
+            if player.is_walking && !is_airborne {
+                let yaw = player.rotation_yaw;
+                let move_dir = Vec3::new(yaw.cos(), 0.0, yaw.sin());
+                let fwd_pos = player_transform.translation + move_dir * 0.35;
+                let fwd_terrain_y = get_bilinear_height(fwd_pos.x, fwd_pos.z, &map);
+                let fwd_ground_y = get_effective_floor_height(fwd_pos, fwd_terrain_y);
+                let step_up_ahead = fwd_ground_y - current_ground_y;
+
+                if step_up_ahead > 0.03 && step_up_ahead <= 0.45 {
+                    let step_up_y = fwd_ground_y + float_height;
+                    player_transform.translation.y = step_up_y;
+                    if let Ok(mut phys_pos) = physics_pos_query.get_mut(_player_entity) {
+                        phys_pos.0.y = step_up_y;
+                    }
+                    if let Ok(mut vel) = velocity_query.get_mut(_player_entity) {
+                        vel.y = vel.y.max(0.0);
+                    }
+                }
+            }
+
             let target_y = player_transform.translation.y - float_height;
 
-            // Penetration recovery safety check: if physics body penetrates deeply below ground (> 0.40m), restore position to ground_y + float_height so Tnua ground check immediately succeeds
-            if target_y < ground_y - 0.40 {
-                let corrected_y = ground_y + float_height;
+            // Penetration recovery safety check: if physics body penetrates deeply below ground (> 0.40m), restore position to current_ground_y + float_height so Tnua ground check immediately succeeds
+            if target_y < current_ground_y - 0.40 {
+                let corrected_y = current_ground_y + float_height;
                 player_transform.translation.y = corrected_y;
                 if let Ok(mut phys_pos) = physics_pos_query.get_mut(_player_entity) {
                     phys_pos.0.y = corrected_y;
@@ -3029,14 +3073,9 @@ fn player_movement_and_ragdoll_system(
             }
 
             let updated_target_y = player_transform.translation.y - float_height;
-            let target_visual_y = updated_target_y.max(ground_y);
-            let is_airborne = if let Ok(vel) = velocity_query.get(_player_entity) {
-                vel.y.abs() > 0.1 || (updated_target_y - ground_y) > 0.03
-            } else {
-                (updated_target_y - ground_y) > 0.03
-            };
-            if !player.is_walking && !is_airborne && (target_visual_y - ground_y).abs() < 0.04 {
-                player.position.y = ground_y;
+            let target_visual_y = updated_target_y.max(current_ground_y);
+            if !player.is_walking && !is_airborne && (target_visual_y - current_ground_y).abs() < 0.04 {
+                player.position.y = current_ground_y;
             } else {
                 player.position.y = target_visual_y;
             }
@@ -3181,7 +3220,7 @@ fn player_movement_and_ragdoll_system(
                 }
             }
 
-            // Manual 2D AABB-vs-Sphere horizontal wall collision & sliding solver (only for manual non-Tnua movement states)
+            // Transform-Oriented 3D OBB-vs-Capsule horizontal wall collision & sliding solver (only for manual non-Tnua movement states)
             if p_state != PlayerState::Active {
                 let player_radius = 0.32 * player.weight;
                 let player_half_height = (player.height * 1.8) * 0.5;
@@ -3193,45 +3232,45 @@ fn player_movement_and_ragdoll_system(
                         continue;
                     }
 
-                    let center = col_transform.translation();
                     let extents = collider.half_extents;
+                    let transform_mat = col_transform.to_matrix();
+                    let inverse_mat = transform_mat.inverse();
 
-                    // 1. Vertical Y Overlap Check: Skip if player's height range is completely above or below collider box
-                    let player_y_min = target_pos.y;
-                    let player_y_max = target_pos.y + player_half_height * 2.0;
-                    let box_y_min = center.y - extents.y;
-                    let box_y_max = center.y + extents.y;
+                    // Transform player world position into the local coordinate system of the collider box
+                    let local_pos = inverse_mat.transform_point3(target_pos);
 
-                    if player_y_max < box_y_min || player_y_min > box_y_max {
+                    // 1. Vertical Y Overlap Check in local space
+                    let local_player_y_min = local_pos.y;
+                    let local_player_y_max = local_pos.y + player_half_height * 2.0;
+
+                    if local_player_y_max < -extents.y || local_player_y_min > extents.y {
                         continue; // Player is on a different floor height level, no collision
                     }
 
-                    // 2. 2D Horizontal XZ Closest Point Computation
-                    let closest_x = target_pos
-                        .x
-                        .clamp(center.x - extents.x, center.x + extents.x);
-                    let closest_z = target_pos
-                        .z
-                        .clamp(center.z - extents.z, center.z + extents.z);
+                    // 2. 2D Horizontal Local XZ Closest Point Computation
+                    let local_closest_x = local_pos.x.clamp(-extents.x, extents.x);
+                    let local_closest_z = local_pos.z.clamp(-extents.z, extents.z);
 
-                    let dx = target_pos.x - closest_x;
-                    let dz = target_pos.z - closest_z;
-                    let dist_sq = dx * dx + dz * dz;
+                    let ldx = local_pos.x - local_closest_x;
+                    let ldz = local_pos.z - local_closest_z;
+                    let dist_sq = ldx * ldx + ldz * ldz;
+
+                    let mut corrected_local = local_pos;
 
                     if dist_sq > 0.000001 {
-                        // Player is outside the 2D bounding box
+                        // Player center is outside the local bounding box
                         let dist = dist_sq.sqrt();
                         if dist < player_radius {
                             let penetration = player_radius - dist;
-                            target_pos.x += (dx / dist) * penetration;
-                            target_pos.z += (dz / dist) * penetration;
+                            corrected_local.x += (ldx / dist) * penetration;
+                            corrected_local.z += (ldz / dist) * penetration;
                         }
                     } else {
-                        // Player center is inside the 2D bounding box - calculate minimum 2D escape vector
-                        let overlap_left = target_pos.x - (center.x - extents.x);
-                        let overlap_right = (center.x + extents.x) - target_pos.x;
-                        let overlap_back = target_pos.z - (center.z - extents.z);
-                        let overlap_front = (center.z + extents.z) - target_pos.z;
+                        // Player center is inside local bounding box - calculate minimum escape vector along local axes
+                        let overlap_left = local_pos.x - (-extents.x);
+                        let overlap_right = extents.x - local_pos.x;
+                        let overlap_back = local_pos.z - (-extents.z);
+                        let overlap_front = extents.z - local_pos.z;
 
                         let min_overlap = overlap_left
                             .min(overlap_right)
@@ -3239,15 +3278,20 @@ fn player_movement_and_ragdoll_system(
                             .min(overlap_front);
 
                         if (min_overlap - overlap_left).abs() < 0.0001 {
-                            target_pos.x = (center.x - extents.x) - player_radius;
+                            corrected_local.x = -extents.x - player_radius;
                         } else if (min_overlap - overlap_right).abs() < 0.0001 {
-                            target_pos.x = (center.x + extents.x) + player_radius;
+                            corrected_local.x = extents.x + player_radius;
                         } else if (min_overlap - overlap_back).abs() < 0.0001 {
-                            target_pos.z = (center.z - extents.z) - player_radius;
+                            corrected_local.z = -extents.z - player_radius;
                         } else {
-                            target_pos.z = (center.z + extents.z) + player_radius;
+                            corrected_local.z = extents.z + player_radius;
                         }
                     }
+
+                    // Transform corrected local position back to world space
+                    let corrected_world = transform_mat.transform_point3(corrected_local);
+                    target_pos.x = corrected_world.x;
+                    target_pos.z = corrected_world.z;
                 }
             }
 
@@ -3410,9 +3454,18 @@ fn player_movement_and_ragdoll_system(
                 if fly_y_dir > 0.0 {
                     player.position.y += 15.0 * fly_speed_mult * dt;
                 } else if fly_y_dir < 0.0 {
+                    let min_descent_y = if water_depth > 0.8 {
+                        water_settings.height - 0.45
+                    } else {
+                        ground_y
+                    };
                     player.position.y =
-                        (player.position.y - 15.0 * fly_speed_mult * dt).max(ground_y);
-                    if player.position.y <= ground_y + 0.05 {
+                        (player.position.y - 15.0 * fly_speed_mult * dt).max(min_descent_y);
+
+                    if water_depth > 0.8 && player.position.y <= water_settings.height - 0.40 {
+                        player.state = PlayerState::Swimming;
+                        inventory_log("🏊 Touched water surface — flight suit disengaged, swimming mode active.");
+                    } else if player.position.y <= ground_y + 0.05 {
                         player.state = PlayerState::Active;
                         inventory_log("🦅 Landed on ground. Flying mode deactivated.");
                     }
@@ -4128,6 +4181,9 @@ fn player_movement_and_ragdoll_system(
             node.old_position = node.position;
         }
 
+        // End nodes mutable borrow before spawning ragdoll colliders
+        let _ = nodes;
+
         // Play puddle stepping sound if triggered and cooldown is up (borrow of nodes has ended here)
         if should_play_wade_sound && player.wade_sound_timer <= 0.0 {
             params.commands.spawn((
@@ -4147,6 +4203,30 @@ fn player_movement_and_ragdoll_system(
             for n in player.nodes.iter_mut() {
                 n.old_position -= forward * 0.2 + Vec3::Y * 0.1;
             }
+            // Despawn any previously spawned ragdoll colliders
+            for col in player.ragdoll_colliders.drain(..) {
+                params.commands.entity(col).despawn();
+            }
+            // Spawn per-node ragdoll colliders and record them on the player
+            let node_infos: Vec<(Vec3, f32)> = player
+                .nodes
+                .iter()
+                .map(|n| (n.position, n.radius))
+                .collect();
+            for (pos, rad) in node_infos.into_iter() {
+                let col_ent = params
+                    .commands
+                    .spawn((
+                        avian3d::prelude::RigidBody::Static,
+                        avian3d::prelude::Collider::sphere(rad),
+                        Transform::from_translation(pos),
+                        PlayRagdollCollider,
+                        PlayModeEntity,
+                    ))
+                    .id();
+                params.commands.entity(_player_entity).add_child(col_ent);
+                player.ragdoll_colliders.push(col_ent);
+            }
         }
 
         // Transition to ragdoll automatically when walking off high precipices
@@ -4154,6 +4234,30 @@ fn player_movement_and_ragdoll_system(
         if player.position.y - lowest_foot > 1.3 * p_height && p_state != PlayerState::Swimming {
             player.state = PlayerState::Ragdoll;
             inventory_log("⚠️ Walked off cliff! Humanoid slipping into ragdoll tumble!");
+            // Despawn any previously spawned ragdoll colliders
+            for col in player.ragdoll_colliders.drain(..) {
+                params.commands.entity(col).despawn();
+            }
+            // Spawn new ragdoll colliders and track them
+            let node_infos: Vec<(Vec3, f32)> = player
+                .nodes
+                .iter()
+                .map(|n| (n.position, n.radius))
+                .collect();
+            for (pos, rad) in node_infos.into_iter() {
+                let col_ent = params
+                    .commands
+                    .spawn((
+                        avian3d::prelude::RigidBody::Static,
+                        avian3d::prelude::Collider::sphere(rad),
+                        Transform::from_translation(pos),
+                        PlayRagdollCollider,
+                        PlayModeEntity,
+                    ))
+                    .id();
+                params.commands.entity(_player_entity).add_child(col_ent);
+                player.ragdoll_colliders.push(col_ent);
+            }
         }
     } else {
         // 3. FULL VERLET PHYSICS RAGDOLL MODE
@@ -4240,6 +4344,10 @@ fn player_movement_and_ragdoll_system(
             for n in player.nodes.iter_mut() {
                 n.old_position = n.position;
             }
+            // Remove ragdoll colliders when switching to swimming
+            for col in player.ragdoll_colliders.drain(..) {
+                params.commands.entity(col).despawn();
+            }
         }
 
         if total_velocity < 0.15 {
@@ -4254,6 +4362,10 @@ fn player_movement_and_ragdoll_system(
             inventory_log("🛡️ Stood back up! Rebalancing active skeleton.");
             for n in player.nodes.iter_mut() {
                 n.old_position = n.position;
+            }
+            // Despawn any ragdoll colliders when standing up
+            for col in player.ragdoll_colliders.drain(..) {
+                params.commands.entity(col).despawn();
             }
         }
     }
@@ -4821,6 +4933,7 @@ fn play_mode_hud_ui(
     mut building_state: ResMut<structures::BuildingPlacementState>,
     mut char_settings: ResMut<CharacterSettings>,
     water_settings: Res<WaterSettings>,
+    cave_data: Res<cave::CaveSystemData>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
@@ -6433,8 +6546,15 @@ fn play_mode_hud_ui(
     }
 
     // ====== MINIMAP (Lower-Left Corner) ======
+    let is_underground = player.position.y < -50.0;
+    let minimap_title = if is_underground {
+        "🗺 Underground Cave Map"
+    } else {
+        "🗺 Map"
+    };
+
     let minimap_size = 180.0_f32;
-    egui::Window::new("🗺 Map")
+    egui::Window::new(minimap_title)
         .anchor(egui::Align2::LEFT_BOTTOM, egui::Vec2::new(10.0, -10.0))
         .fixed_size(egui::Vec2::new(minimap_size + 8.0, minimap_size + 24.0))
         .collapsible(true)
@@ -6454,75 +6574,119 @@ fn play_mode_hud_ui(
             let map_h = map.height as f32;
             let water_y = water_settings.height;
 
-            // Downsample terrain to minimap pixels
-            let px_count = minimap_size as usize;
-            let step_x = map_w / px_count as f32;
-            let step_z = map_h / px_count as f32;
-            let px_size = minimap_size / px_count as f32;
+            let world_to_minimap: Box<dyn Fn(f32, f32) -> egui::Pos2> = if is_underground && !cave_data.grid.is_empty() {
+                let cols = cave_data.grid_cols;
+                let rows = cave_data.grid_rows;
+                let cave_w = cols as f32 * crate::play_mode::cave::CAVE_CELL_SIZE;
+                let cave_h = rows as f32 * crate::play_mode::cave::CAVE_CELL_SIZE;
 
-            for pz in 0..px_count {
-                for px in 0..px_count {
-                    let map_x = (px as f32 * step_x) as u32;
-                    let map_z = (pz as f32 * step_z) as u32;
-                    let h = map.get_height(map_x.min(map.width - 1), map_z.min(map.height - 1));
-                    let biome = map.get_biome(map_x.min(map.width - 1), map_z.min(map.height - 1));
+                let px_count = minimap_size as usize;
+                let step_c = cols as f32 / px_count as f32;
+                let step_r = rows as f32 / px_count as f32;
+                let px_size = minimap_size / px_count as f32;
 
-                    let color = if h < water_y {
-                        // Water: depth-shaded blue
-                        let depth = ((water_y - h) * 8.0).clamp(0.0, 1.0);
-                        egui::Color32::from_rgb(
-                            (15.0 - depth * 10.0) as u8,
-                            (40.0 + depth * 20.0) as u8,
-                            (100.0 + depth * 80.0) as u8,
-                        )
-                    } else {
-                        // Land: biome-colored with elevation shading
-                        let elev = (h * 3.0).clamp(0.0, 1.0);
-                        match biome {
-                            crate::map_editor::data::Biome::Temperate => egui::Color32::from_rgb(
-                                (30.0 + elev * 40.0) as u8,
-                                (70.0 + elev * 90.0) as u8,
-                                (25.0 + elev * 30.0) as u8,
-                            ),
-                            crate::map_editor::data::Biome::Arid => egui::Color32::from_rgb(
-                                (140.0 + elev * 60.0) as u8,
-                                (110.0 + elev * 50.0) as u8,
-                                (60.0 + elev * 30.0) as u8,
-                            ),
-                            crate::map_editor::data::Biome::Tundra => egui::Color32::from_rgb(
-                                (80.0 + elev * 70.0) as u8,
-                                (100.0 + elev * 80.0) as u8,
-                                (90.0 + elev * 60.0) as u8,
-                            ),
-                            crate::map_editor::data::Biome::Arctic => egui::Color32::from_rgb(
-                                (180.0 + elev * 50.0) as u8,
-                                (195.0 + elev * 40.0) as u8,
-                                (210.0 + elev * 30.0) as u8,
-                            ),
-                        }
-                    };
+                for pr in 0..px_count {
+                    for pc in 0..px_count {
+                        let c = ((pc as f32 * step_c) as usize).min(cols - 1);
+                        let r = ((pr as f32 * step_r) as usize).min(rows - 1);
+                        let cell = cave_data.grid[c][r];
 
-                    let screen_x = rect.left() + px as f32 * px_size;
-                    let screen_y = rect.top() + pz as f32 * px_size;
-                    painter.rect_filled(
-                        egui::Rect::from_min_size(
-                            egui::Pos2::new(screen_x, screen_y),
-                            egui::Vec2::splat(px_size + 0.5),
-                        ),
-                        0.0,
-                        color,
-                    );
+                        let color = match cell {
+                            0 => egui::Color32::from_rgb(28, 32, 42),  // Solid Rock Wall
+                            1 => egui::Color32::from_rgb(15, 24, 38),  // Open Tunnel Passage
+                            2 => egui::Color32::from_rgb(22, 58, 78),  // Cavern Hub / Chamber
+                            _ => egui::Color32::from_rgb(10, 12, 18),
+                        };
+
+                        let screen_x = rect.left() + pc as f32 * px_size;
+                        let screen_y = rect.top() + pr as f32 * px_size;
+                        painter.rect_filled(
+                            egui::Rect::from_min_size(
+                                egui::Pos2::new(screen_x, screen_y),
+                                egui::Vec2::splat(px_size + 0.5),
+                            ),
+                            0.0,
+                            color,
+                        );
+                    }
                 }
-            }
 
-            // Helper: convert world pos to minimap screen pos
-            let world_to_minimap = |wx: f32, wz: f32| -> egui::Pos2 {
-                let nx = (wx + map_w / 2.0) / map_w;
-                let nz = (wz + map_h / 2.0) / map_h;
-                egui::Pos2::new(
-                    rect.left() + nx * minimap_size,
-                    rect.top() + nz * minimap_size,
-                )
+                Box::new(move |wx: f32, wz: f32| -> egui::Pos2 {
+                    let nx = (wx + cave_w / 2.0) / cave_w;
+                    let nz = (wz + cave_h / 2.0) / cave_h;
+                    egui::Pos2::new(
+                        rect.left() + nx.clamp(0.0, 1.0) * minimap_size,
+                        rect.top() + nz.clamp(0.0, 1.0) * minimap_size,
+                    )
+                })
+            } else {
+                // Downsample surface terrain to minimap pixels
+                let px_count = minimap_size as usize;
+                let step_x = map_w / px_count as f32;
+                let step_z = map_h / px_count as f32;
+                let px_size = minimap_size / px_count as f32;
+
+                for pz in 0..px_count {
+                    for px in 0..px_count {
+                        let map_x = (px as f32 * step_x) as u32;
+                        let map_z = (pz as f32 * step_z) as u32;
+                        let h = map.get_height(map_x.min(map.width - 1), map_z.min(map.height - 1));
+                        let biome = map.get_biome(map_x.min(map.width - 1), map_z.min(map.height - 1));
+
+                        let color = if h < water_y {
+                            let depth = ((water_y - h) * 8.0).clamp(0.0, 1.0);
+                            egui::Color32::from_rgb(
+                                (15.0 - depth * 10.0) as u8,
+                                (40.0 + depth * 20.0) as u8,
+                                (100.0 + depth * 80.0) as u8,
+                            )
+                        } else {
+                            let elev = (h * 3.0).clamp(0.0, 1.0);
+                            match biome {
+                                crate::map_editor::data::Biome::Temperate => egui::Color32::from_rgb(
+                                    (30.0 + elev * 40.0) as u8,
+                                    (70.0 + elev * 90.0) as u8,
+                                    (25.0 + elev * 30.0) as u8,
+                                ),
+                                crate::map_editor::data::Biome::Arid => egui::Color32::from_rgb(
+                                    (140.0 + elev * 60.0) as u8,
+                                    (110.0 + elev * 50.0) as u8,
+                                    (60.0 + elev * 30.0) as u8,
+                                ),
+                                crate::map_editor::data::Biome::Tundra => egui::Color32::from_rgb(
+                                    (80.0 + elev * 70.0) as u8,
+                                    (100.0 + elev * 80.0) as u8,
+                                    (90.0 + elev * 60.0) as u8,
+                                ),
+                                crate::map_editor::data::Biome::Arctic => egui::Color32::from_rgb(
+                                    (180.0 + elev * 50.0) as u8,
+                                    (195.0 + elev * 40.0) as u8,
+                                    (210.0 + elev * 30.0) as u8,
+                                ),
+                            }
+                        };
+
+                        let screen_x = rect.left() + px as f32 * px_size;
+                        let screen_y = rect.top() + pz as f32 * px_size;
+                        painter.rect_filled(
+                            egui::Rect::from_min_size(
+                                egui::Pos2::new(screen_x, screen_y),
+                                egui::Vec2::splat(px_size + 0.5),
+                            ),
+                            0.0,
+                            color,
+                        );
+                    }
+                }
+
+                Box::new(move |wx: f32, wz: f32| -> egui::Pos2 {
+                    let nx = (wx + map_w / 2.0) / map_w;
+                    let nz = (wz + map_h / 2.0) / map_h;
+                    egui::Pos2::new(
+                        rect.left() + nx * minimap_size,
+                        rect.top() + nz * minimap_size,
+                    )
+                })
             };
 
             // Draw creature dots
@@ -6531,21 +6695,24 @@ fn play_mode_hud_ui(
                     continue;
                 }
                 let pos = ct.translation;
+                if is_underground != (pos.y < -50.0) {
+                    continue;
+                }
                 let dot_pos = world_to_minimap(pos.x, pos.z);
                 if !rect.contains(dot_pos) {
                     continue;
                 }
                 let (dot_color, dot_size) = match creature.creature_type {
-                    creatures::CreatureType::Fox => (egui::Color32::from_rgb(255, 165, 50), 3.0), // orange companion
-                    creatures::CreatureType::Monster => (egui::Color32::from_rgb(220, 40, 40), 3.5), // red hostile
-                    creatures::CreatureType::Alien => (egui::Color32::from_rgb(180, 30, 180), 3.0), // purple hostile
+                    creatures::CreatureType::Fox => (egui::Color32::from_rgb(255, 165, 50), 3.0),
+                    creatures::CreatureType::Monster => (egui::Color32::from_rgb(220, 40, 40), 3.5),
+                    creatures::CreatureType::Alien => (egui::Color32::from_rgb(180, 30, 180), 3.0),
                     creatures::CreatureType::Triangaroo => {
                         (egui::Color32::from_rgb(200, 200, 50), 2.5)
-                    } // yellow
+                    }
                     creatures::CreatureType::RobotTrilobite => {
                         (egui::Color32::from_rgb(50, 200, 255), 2.5)
-                    } // cyan defender
-                    _ => (egui::Color32::from_rgb(150, 150, 150), 2.0), // gray
+                    }
+                    _ => (egui::Color32::from_rgb(150, 150, 150), 2.0),
                 };
                 painter.circle_filled(dot_pos, dot_size, dot_color);
             }
