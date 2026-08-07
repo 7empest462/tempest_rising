@@ -373,7 +373,7 @@ fn initialize_ragdoll_skeleton(settings: &CharacterSettings, physics: &mut Ragdo
     ];
 
     let mut constraints = Vec::new();
-    let node_map: std::collections::HashMap<String, Vec3> =
+    let node_map: rustc_hash::FxHashMap<String, Vec3> =
         nodes.iter().map(|n| (n.name.clone(), n.position)).collect();
 
     let connections = vec![

@@ -307,7 +307,7 @@ pub fn drive_fox_animations(
         }
 
         let speed = creature.velocity.length();
-        let target_node = if creature.state == CreatureState::Idle || speed < 0.1 {
+        let target_node = if creature.state == CreatureState::Idle || speed < 0.25 {
             anims.survey
         } else if speed < 2.5 {
             anims.walk
@@ -918,7 +918,7 @@ pub fn spawn_creatures_system(
         let pos = alien_spawn_positions[i];
         commands.spawn((
             WorldAssetRoot(asset_server.load("alien.glb#Scene0")),
-            Transform::from_translation(pos),
+            Transform::from_translation(pos).with_scale(Vec3::splat(1.75)),
             PlayCreature {
                 creature_type: CreatureType::Alien,
                 state: CreatureState::Wandering,
@@ -1193,6 +1193,7 @@ pub fn creature_ai_system(
     mut assets: CreatureAssets,
 ) {
     let dt = time.delta_secs();
+    profiling::scope!("creature_ai_system");
     let Ok((_player_entity, mut player)) = player_query.single_mut() else {
         return;
     };
@@ -1214,7 +1215,7 @@ pub fn creature_ai_system(
         .collect();
 
     // Pre-collect tamed companion foxes for spatial slot assignment & mutual collision avoidance
-    let tamed_fox_positions: Vec<(Entity, Vec3)> = creature_query
+    let tamed_fox_positions: smallvec::SmallVec<[(Entity, Vec3); 16]> = creature_query
         .iter()
         .filter(|(_, c, _, _, _, t)| {
             c.creature_type == CreatureType::Fox
@@ -1273,14 +1274,13 @@ pub fn creature_ai_system(
         if count > 0 {
             separation = (separation / count as f32) * 3.5; // strength of the push
 
-            // Now apply the separation to this fox’s velocity or position
-            // (depends on how your movement works)
             if let Ok((_, mut creature, ..)) = creature_query.get_mut(*entity) {
-                // Option A: push the velocity
-                creature.velocity += separation;
-
-                // Option B (if you prefer): directly nudge the position a little
-                // transform.translation += separation * 0.15;
+                // Only add separation velocity when actively moving; nudge position directly when idle
+                if creature.state != CreatureState::Idle {
+                    creature.velocity += separation;
+                } else {
+                    creature.position += separation * dt;
+                }
             }
         }
     }
@@ -1547,8 +1547,8 @@ pub fn creature_ai_system(
                     } else {
                         // Follow player
                         let dist_to_player = creature.position.distance(player_pos);
-                        if dist_to_player > 3.2 {
-                            let desired_speed = 3.8;
+                        if dist_to_player > 4.5 {
+                            let desired_speed = if dist_to_player > 7.0 { 4.5 } else { 2.2 };
                             let creature_radius = 0.35;
                             let (vel, path, path_idx, stuck_timer, last_progress_pos) =
                                 nav::navigate_toward(
@@ -1595,10 +1595,14 @@ pub fn creature_ai_system(
                             }
                         }
 
-                        if count > 0 {
+                        if count > 0 && creature.state != CreatureState::Idle {
                             separation = (separation / count as f32) * 4.5;
                             separation.y = 0.0;
                             creature.velocity += separation;
+                        }
+
+                        if creature.state == CreatureState::Idle {
+                            creature.velocity = Vec3::ZERO;
                         }
                     }
 
@@ -2565,7 +2569,6 @@ pub fn spawn_saved_tamed_foxes(
     player_query: Query<&crate::play_mode::PlayModePlayer>,
     tamed_fox_query: Query<&TamedFox>,
     asset_server: Res<AssetServer>,
-    fox_animations: Option<Res<FoxAnimations>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     map: Res<TempestMap>,
@@ -2593,11 +2596,7 @@ pub fn spawn_saved_tamed_foxes(
             let name =
                 names[(rand::random::<u32>() as usize + i as usize) % names.len()].to_string();
 
-            let fox_entity = if let Some(anims) = &fox_animations {
-                let graph = anims.graph.clone();
-                let mut animation_player = AnimationPlayer::default();
-                animation_player.play(anims.run).repeat();
-
+            let fox_entity = {
                 let parent_fox = commands
                     .spawn((
                         PlayCreature {
@@ -2625,8 +2624,6 @@ pub fn spawn_saved_tamed_foxes(
                         },
                         PlayerDefender,
                         Transform::from_translation(spawn_pos),
-                        AnimationGraphHandle(graph),
-                        animation_player,
                         crate::play_mode::PlayModeEntity,
                     ))
                     .id();
@@ -2643,45 +2640,6 @@ pub fn spawn_saved_tamed_foxes(
 
                 commands.entity(parent_fox).add_child(child_visual);
                 parent_fox
-            } else {
-                let body_mat = materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.9, 0.45, 0.1),
-                    perceptual_roughness: 0.6,
-                    ..default()
-                });
-                let body_mesh = meshes.add(Cuboid::new(0.6, 0.45, 0.9));
-                commands
-                    .spawn((
-                        Mesh3d(body_mesh),
-                        MeshMaterial3d(body_mat),
-                        PlayCreature {
-                            creature_type: CreatureType::Fox,
-                            state: CreatureState::Idle,
-                            health: 45.0,
-                            max_health: 45.0,
-                            position: spawn_pos,
-                            velocity: Vec3::ZERO,
-                            yaw: 0.0,
-                            wander_timer: 2.0,
-                            hop_cooldown: 0.0,
-                            is_grounded: true,
-                            death_timer: 0.0,
-                            attack_cooldown: 0.0,
-                            nav_path: Vec::new(),
-                            nav_path_index: 0,
-                            stuck_timer: 0.0,
-                            last_progress_pos: Vec3::ZERO,
-                        },
-                        TamedFox {
-                            name: name.clone(),
-                            friendship: 3,
-                            pounce_cooldown: 0.0,
-                        },
-                        PlayerDefender,
-                        Transform::from_translation(spawn_pos),
-                        crate::play_mode::PlayModeEntity,
-                    ))
-                    .id()
             };
 
             // Spawn Golden Companion Collar / Glow Ring on Fox Upper Neck

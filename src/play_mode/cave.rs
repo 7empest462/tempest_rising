@@ -178,7 +178,17 @@ pub fn setup_underground_cave_system(
     cave_data.grid_rows = grid_rows;
     cave_data.grid = grid.clone();
 
-    let cave_rock_texture = asset_server.load("textures/rock.png");
+    let cave_rock_texture = asset_server
+        .load_builder()
+        .with_settings(|settings: &mut bevy::image::ImageLoaderSettings| {
+            settings.sampler =
+                bevy::image::ImageSampler::Descriptor(bevy::image::ImageSamplerDescriptor {
+                    address_mode_u: bevy::image::ImageAddressMode::Repeat,
+                    address_mode_v: bevy::image::ImageAddressMode::Repeat,
+                    ..default()
+                });
+        })
+        .load("textures/rock.png");
 
     let wall_mat = materials.add(StandardMaterial {
         base_color: Color::srgb(0.55, 0.55, 0.58),

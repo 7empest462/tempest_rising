@@ -4,6 +4,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
+pub type HashMap<K, V> = hashbrown::HashMap<K, V>;
 use std::fs::File;
 use std::io::{Read, Write};
 
@@ -637,11 +638,13 @@ pub fn update_terrain_mesh_in_place(
     let mut positions = Vec::with_capacity(total);
     let mut normals = vec![[0.0, 1.0, 0.0]; total];
     let mut colors = Vec::with_capacity(total);
+    let mut uvs = Vec::with_capacity(total);
 
     for z in 0..h {
         for x in 0..w {
             let y = map.get_height(x, z);
             positions.push([x as f32 + offset_x, y, z as f32 + offset_z]);
+            uvs.push([x as f32 * 0.25, z as f32 * 0.25]);
         }
     }
 
@@ -680,9 +683,29 @@ pub fn update_terrain_mesh_in_place(
         }
     }
 
+    let mut indices = Vec::with_capacity(((w - 1) * (h - 1) * 6) as usize);
+    for z in 0..(h - 1) {
+        for x in 0..(w - 1) {
+            let i0 = z * w + x;
+            let i1 = z * w + (x + 1);
+            let i2 = (z + 1) * w + x;
+            let i3 = (z + 1) * w + (x + 1);
+
+            indices.push(i0);
+            indices.push(i2);
+            indices.push(i1);
+
+            indices.push(i1);
+            indices.push(i2);
+            indices.push(i3);
+        }
+    }
+
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(indices));
 }
 
 pub fn generate_terrain_mesh(map: &TempestMap, settings: &SplatmapSettings) -> Mesh {
@@ -998,8 +1021,8 @@ fn spawn_prefab_visuals(
     parent
 }
 
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use parking_lot::Mutex;
+use std::sync::OnceLock;
 
 #[allow(clippy::type_complexity)]
 static PROCEDURAL_MESH_CACHE: OnceLock<Mutex<HashMap<(String, u32), Handle<Mesh>>>> =
@@ -1018,8 +1041,8 @@ pub fn spawn_prefab_visuals_children(
     asset_server: &AssetServer,
     custom_mesh: Option<&EditableMesh>,
 ) {
-    let cache = PROCEDURAL_MESH_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut cache_guard = cache.lock().unwrap();
+    let cache = PROCEDURAL_MESH_CACHE.get_or_init(|| Mutex::new(HashMap::default()));
+    let mut cache_guard = cache.lock();
 
     match prefab_type {
         s if s.starts_with("tree") || s == "shrub" || s == "cactus" => {
@@ -3956,10 +3979,14 @@ fn map_editor_ui(
                             map.resize(new_w, new_h);
 
                             // Rebuild terrain mesh fully
-                            for (entity, _) in terrain_query.iter() {
-                                let new_mesh = generate_terrain_mesh(&map, &splat_settings);
-                                let new_handle = meshes.add(new_mesh);
-                                commands.entity(entity).insert(Mesh3d(new_handle));
+                            for (entity, mesh_3d) in terrain_query.iter() {
+                                if let Some(mut mesh) = meshes.get_mut(&mesh_3d.0) {
+                                    update_terrain_mesh_in_place(&mut mesh, &map, &splat_settings);
+                                } else {
+                                    let new_mesh = generate_terrain_mesh(&map, &splat_settings);
+                                    let new_handle = meshes.add(new_mesh);
+                                    commands.entity(entity).insert(Mesh3d(new_handle));
+                                }
                             }
 
                             // Rebuild water mesh fully & replace simulation component

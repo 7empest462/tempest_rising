@@ -13,11 +13,14 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::window::{CursorGrabMode, CursorOptions};
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
+pub type HashMap<K, V> = hashbrown::HashMap<K, V>;
 
 pub mod cave;
 pub mod creatures;
 pub mod house;
+use house::create_world_uv_cuboid;
 pub mod nav;
+pub mod quests;
 pub mod structures;
 
 type CreatureBodyQuery<'w, 's> = Query<
@@ -31,6 +34,8 @@ pub struct PlayModePlugin;
 impl Plugin for PlayModePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PlayerInventory>()
+            .init_resource::<quests::QuestTracker>()
+            .init_resource::<quests::ActiveDialogueState>()
             .init_resource::<creatures::CreatureRespawnTimer>()
             .init_resource::<structures::BuildingPlacementState>()
             .add_plugins(house::HousePlugin)
@@ -63,8 +68,11 @@ impl Plugin for PlayModePlugin {
                     play_visual_sync_system,
                     play_weapon_sync_system,
                     player_armor_sync_system,
+                    thruster_flame_visibility_system,
                     weapon_attachment_system,
                     particle_update_system,
+                    alien_dialogue_and_quest_ui_system,
+                    quests::alien_npc_animation_system,
                 )
                     .run_if(in_state(AppState::PlayMode)),
             )
@@ -252,6 +260,8 @@ pub struct SaveData {
     pub has_recall_beacon: bool,
     #[serde(default)]
     pub tamed_fox_count: u32,
+    #[serde(default)]
+    pub quest_tracker: quests::QuestTracker,
     pub player_pos: [f32; 3],
     pub health: f32,
     pub max_health: f32,
@@ -275,6 +285,7 @@ pub fn save_progress(
     inventory: &PlayerInventory,
     player: &PlayModePlayer,
     char_settings: &CharacterSettings,
+    quest_tracker: &quests::QuestTracker,
 ) -> Result<(), String> {
     let data = SaveData {
         wood: inventory.wood,
@@ -309,6 +320,7 @@ pub fn save_progress(
         has_leather_armor: inventory.has_leather_armor,
         has_recall_beacon: inventory.has_recall_beacon,
         tamed_fox_count: inventory.tamed_fox_count,
+        quest_tracker: quest_tracker.clone(),
         player_pos: [player.position.x, player.position.y, player.position.z],
         health: player.health,
         max_health: player.max_health,
@@ -338,6 +350,7 @@ pub fn load_progress(
     inventory: &mut PlayerInventory,
     player: &mut PlayModePlayer,
     char_settings: &mut CharacterSettings,
+    quest_tracker: &mut quests::QuestTracker,
 ) -> Result<(), String> {
     let json = std::fs::read_to_string("save_game.json").map_err(|e| e.to_string())?;
     let data: SaveData = serde_json::from_str(&json).map_err(|e| e.to_string())?;
@@ -374,6 +387,8 @@ pub fn load_progress(
     inventory.has_sword = data.has_sword;
     inventory.has_leather_armor = data.has_leather_armor;
     inventory.has_recall_beacon = data.has_recall_beacon;
+
+    *quest_tracker = data.quest_tracker;
 
     player.position = Vec3::from_array(data.player_pos);
     player.health = data.health;
@@ -573,7 +588,7 @@ pub struct PlayWeaponAssets {
 
 #[derive(Resource)]
 pub struct TerrainLoadChannel {
-    pub rx: std::sync::Mutex<std::sync::mpsc::Receiver<(Mesh, Vec<crate::grass::GrassChunkData>)>>,
+    pub rx: crossbeam::channel::Receiver<(Mesh, Vec<crate::grass::GrassChunkData>)>,
 }
 
 #[derive(Component)]
@@ -591,6 +606,9 @@ pub struct PlayAxeVisual;
 pub struct PlayArmorVisual {
     pub armor_tier: ArmorTier,
 }
+
+#[derive(Component)]
+pub struct ThrusterFlame;
 
 #[allow(dead_code)]
 #[derive(Component)]
@@ -1017,7 +1035,7 @@ fn spawn_modular_block_colliders(
 fn setup_play_mode(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    map: Res<TempestMap>,
+    mut map: ResMut<TempestMap>,
     char_settings: Res<CharacterSettings>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -1241,8 +1259,8 @@ fn setup_play_mode(
         PlayModeEntity,
     ));
 
-    // 4. Spawn 3D Terrain & Grass (Asynchronously in Background)
-    let (tx, rx) = std::sync::mpsc::channel();
+    // 4. Spawn 3D Terrain & Grass (Asynchronously in Background via Lock-Free Crossbeam Channel)
+    let (tx, rx) = crossbeam::channel::unbounded();
     let map_clone = map.clone();
     let tokio_handle = rt.0.clone();
 
@@ -1254,9 +1272,7 @@ fn setup_play_mode(
         let _ = tx.send((terrain_mesh, grass_chunks));
     });
 
-    commands.insert_resource(TerrainLoadChannel {
-        rx: std::sync::Mutex::new(rx),
-    });
+    commands.insert_resource(TerrainLoadChannel { rx });
 
     // Spawn 3D Terrain (Physical Heightfield Collider)
     let mut heights = vec![vec![0.0; map.width as usize]; map.height as usize];
@@ -1401,6 +1417,12 @@ fn setup_play_mode(
     let half_w = (mansion_settings.cols as f32 * mansion_settings.cell_size) / 2.0;
     let half_d = (mansion_settings.rows as f32 * mansion_settings.cell_size) / 2.0;
 
+    let mut outpost_pos = spawn_pos + Vec3::new(35.0, 0.0, 25.0);
+    let max_hill_y = quests::get_max_terrain_in_radius(outpost_pos.x, outpost_pos.z, 14.0, &map);
+    outpost_pos.y = max_hill_y + 1.2;
+    quests::flatten_outpost_terrain(&mut map, outpost_pos);
+    set_outpost_global_bounds(outpost_pos);
+
     // 5. Spawn all Placed Prefabs (Resource Nodes and Modular/Custom blocks)
     for (idx, p) in map.prefabs.iter().enumerate() {
         if p.prefab_type == "spawn_point"
@@ -1417,6 +1439,23 @@ fn setup_play_mode(
             && (p_pos.z - house_pos.z).abs() < half_d + 3.5;
         if inside {
             continue;
+        }
+
+        // Skip spawning natural trees, rocks, or resource nodes in Zolyrian Outpost platform zone & ramp corridors
+        let dist_to_outpost = (p_pos.x - outpost_pos.x).hypot(p_pos.z - outpost_pos.z);
+        if dist_to_outpost < 31.0 {
+            let op_dx = p_pos.x - outpost_pos.x;
+            let op_dz = p_pos.z - outpost_pos.z;
+            let angle = op_dz.atan2(op_dx);
+            let is_near_ramp_corridor = (0..4).any(|i| {
+                let r_angle = (i as f32) * std::f32::consts::FRAC_PI_2;
+                let diff = (angle - r_angle).sin().abs();
+                diff < 0.32 // ~18 degree corridor clearance window around each ramp
+            });
+
+            if dist_to_outpost < 14.0 || is_near_ramp_corridor {
+                continue;
+            }
         }
 
         let is_mod_or_custom = matches!(
@@ -1842,7 +1881,7 @@ fn setup_play_mode(
     });
 
     // We hold reference to spawned nodes to parent them
-    let mut visual_nodes = std::collections::HashMap::new();
+    let mut visual_nodes = HashMap::default();
 
     // Loop nodes and spawn either bone shapes or skin spheres
     for node in nodes.iter() {
@@ -2305,6 +2344,352 @@ fn setup_play_mode(
 
     // 10. Spawn 3D Crashed Starship Wreckage near spawn location
     spawn_crashed_starship(&mut commands, &mut meshes, &mut materials, spawn_pos, &map);
+
+    // 11. Spawn Zolyrian Native Alien Outpost & Quests (using synchronized global outpost_pos)
+    let op_x = f32::from_bits(OUTPOST_POS_X.load(Ordering::Relaxed));
+    let op_y = f32::from_bits(OUTPOST_POS_Y.load(Ordering::Relaxed));
+    let op_z = f32::from_bits(OUTPOST_POS_Z.load(Ordering::Relaxed));
+    let outpost_pos = Vec3::new(op_x, op_y, op_z);
+    let temp_tracker = quests::QuestTracker::default();
+    quests::spawn_alien_outpost(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &asset_server,
+        outpost_pos,
+        &temp_tracker,
+    );
+
+    // 12. Spawn Harmony Beacons on mountain peaks clamped to actual terrain height
+    let b0_pos = spawn_pos + Vec3::new(65.0, 0.0, -45.0);
+    let b0_y = get_bilinear_height(b0_pos.x, b0_pos.z, &map);
+    let b1_pos = spawn_pos + Vec3::new(-70.0, 0.0, 60.0);
+    let b1_y = get_bilinear_height(b1_pos.x, b1_pos.z, &map);
+    let b2_pos = spawn_pos + Vec3::new(10.0, 0.0, -85.0);
+    let b2_y = get_bilinear_height(b2_pos.x, b2_pos.z, &map);
+
+    let beacon_locs = vec![
+        (0, Vec3::new(b0_pos.x, b0_y, b0_pos.z)),
+        (1, Vec3::new(b1_pos.x, b1_y, b1_pos.z)),
+        (2, Vec3::new(b2_pos.x, b2_y, b2_pos.z)),
+    ];
+    quests::spawn_harmony_beacons(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &beacon_locs,
+        &temp_tracker,
+    );
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn alien_dialogue_and_quest_ui_system(
+    mut commands: Commands,
+    mut contexts: EguiContexts,
+    mut inventory: ResMut<PlayerInventory>,
+    mut quest_tracker: ResMut<quests::QuestTracker>,
+    mut dialogue_state: ResMut<quests::ActiveDialogueState>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut player_query: Query<&mut PlayModePlayer>,
+    npc_query: Query<(&Transform, &quests::NativeAlienNPC)>,
+    shrine_query: Query<(Entity, &Transform, &quests::HydroShrine)>,
+    mut beacon_query: Query<(Entity, &Transform, &mut quests::HarmonyBeacon)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let Ok(ctx) = contexts.ctx_mut() else { return };
+    let Ok(mut player) = player_query.single_mut() else {
+        return;
+    };
+
+    // --- 1. PROXIMITY DETECTION & INTERACTION PROMPTS ---
+    let mut near_npc: Option<(&Transform, &quests::NativeAlienNPC)> = None;
+    for (trans, npc) in npc_query.iter() {
+        if player.position.distance(trans.translation) < 4.5 {
+            near_npc = Some((trans, npc));
+            break;
+        }
+    }
+
+    if let Some((_, npc)) = near_npc {
+        if !dialogue_state.is_open {
+            egui::Area::new(egui::Id::new("npc_talk_prompt"))
+                .anchor(egui::Align2::CENTER_BOTTOM, egui::Vec2::new(0.0, -115.0))
+                .show(ctx, |ui| {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "💬 Press [E] to Speak with {} ({})",
+                            npc.name, npc.role
+                        ))
+                        .size(18.0)
+                        .strong()
+                        .color(egui::Color32::from_rgb(120, 240, 200)),
+                    );
+                });
+
+            if keyboard.just_pressed(KeyCode::KeyE) {
+                dialogue_state.is_open = true;
+                dialogue_state.npc_name = npc.name.clone();
+                dialogue_state.quest_offer = npc.quest_id;
+            }
+        }
+    } else {
+        if !near_npc.is_some() && dialogue_state.is_open {
+            // Keep window manageable if walking away
+        }
+    }
+
+    // --- 2. INTERACTIVE ALIEN DIALOGUE MODAL ---
+    if dialogue_state.is_open {
+        let mut is_open = true;
+        let mut close_requested = false;
+        egui::Window::new(format!("👽 Zolyrian Dialogue — {}", dialogue_state.npc_name))
+            .open(&mut is_open)
+            .default_width(460.0)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(8.0);
+                    ui.heading(
+                        egui::RichText::new(format!("Greetings, Traveler! I am {}.", dialogue_state.npc_name))
+                            .strong()
+                            .color(egui::Color32::from_rgb(100, 230, 255)),
+                    );
+                    ui.add_space(4.0);
+                });
+
+                ui.separator();
+                ui.add_space(8.0);
+
+                match dialogue_state.quest_offer {
+                    quests::QuestId::RebuildShrine => {
+                        if !quest_tracker.completed_shrine {
+                            ui.label(egui::RichText::new(
+                                "Our ancient Hydro-Crystal Shrine was shattered during the beast invasion! Without its cleansing waters, our crops are dying. Will you gather 10 Wood, 10 Granite, and 5 Crystal Shards from the caves to help us rebuild?"
+                            ).size(15.0));
+                            ui.add_space(12.0);
+
+                            if quest_tracker.active_quest == quests::QuestId::None {
+                                if ui.button(egui::RichText::new("🛠️ Accept Quest 1: Restoring the Hydro-Shrine").strong().size(16.0).color(egui::Color32::YELLOW)).clicked() {
+                                    quest_tracker.active_quest = quests::QuestId::RebuildShrine;
+                                    inventory_log("📜 Accepted Quest: Restoring the Hydro-Shrine!");
+                                    close_requested = true;
+                                }
+                            } else if quest_tracker.active_quest == quests::QuestId::RebuildShrine {
+                                let has_mats = inventory.wood >= 10 && inventory.granite >= 10 && inventory.crystal_shard >= 5;
+                                if has_mats {
+                                    ui.label(egui::RichText::new("✨ You have all the materials! Approach the shrine altar to channel the power!").color(egui::Color32::GREEN));
+                                } else {
+                                    ui.label(egui::RichText::new(format!(
+                                        "Progress: Wood [{}/10] | Granite [{}/10] | Crystals [{}/5]",
+                                        inventory.wood, inventory.granite, inventory.crystal_shard
+                                    )).color(egui::Color32::LIGHT_GRAY));
+                                }
+                            }
+                        } else {
+                            ui.label(egui::RichText::new("Thank you for restoring our Hydro-Shrine! Its crystal light shines bright once more.").size(15.0).color(egui::Color32::GREEN));
+                        }
+                    }
+                    quests::QuestId::ThreatAtHatchery => {
+                        if !quest_tracker.completed_hatchery {
+                            ui.label(egui::RichText::new(
+                                "Rogue corrupted beasts are threatening our village hatchery in the surrounding hills! We need a skilled hunter to cull 5 of these hostile creatures before they overrun our perimeter."
+                            ).size(15.0));
+                            ui.add_space(12.0);
+
+                            if quest_tracker.completed_shrine && quest_tracker.active_quest == quests::QuestId::None {
+                                if ui.button(egui::RichText::new("⚔️ Accept Quest 2: Threat at the Hatchery").strong().size(16.0).color(egui::Color32::YELLOW)).clicked() {
+                                    quest_tracker.active_quest = quests::QuestId::ThreatAtHatchery;
+                                    quest_tracker.quest_progress = 0;
+                                    inventory_log("📜 Accepted Quest: Threat at the Hatchery!");
+                                    close_requested = true;
+                                }
+                            } else if quest_tracker.active_quest == quests::QuestId::ThreatAtHatchery {
+                                ui.label(egui::RichText::new(format!("Beasts Slain: [{}/5]", quest_tracker.quest_progress)).color(egui::Color32::LIGHT_BLUE));
+                                if quest_tracker.quest_progress >= 5
+                                    && ui.button(egui::RichText::new("🎁 Turn In Quest 2 (+3 Robot Parts, +70 Ammo)").strong().size(16.0).color(egui::Color32::GREEN)).clicked() {
+                                        quest_tracker.completed_hatchery = true;
+                                        quest_tracker.active_quest = quests::QuestId::None;
+                                        inventory.robot_parts += 3;
+                                        player.ammo_rifle += 50;
+                                        player.ammo_revolver += 20;
+                                        inventory_log("🎉 Completed Quest 2! Received +3 Robot Parts, +50 Rifle Ammo, +20 Revolver Ammo!");
+                                        close_requested = true;
+                                    }
+                            } else if !quest_tracker.completed_shrine {
+                                ui.label(egui::RichText::new("🔒 (Requires completing Quest 1 first)").color(egui::Color32::GRAY));
+                            }
+                        } else {
+                            ui.label(egui::RichText::new("The hatchery is safe thanks to your brave defense! Our gratitude to you, traveler.").size(15.0).color(egui::Color32::GREEN));
+                        }
+                    }
+                    quests::QuestId::AstralCompass => {
+                        if !quest_tracker.completed_compass {
+                            ui.label(egui::RichText::new(
+                                "Our sacred relic, the Astral Compass, was locked away deep within the subterranean Research Complex Basement Crypt! Retrieve the relic for us, and I will empower your armor with Zolyrian Energy Shielding!"
+                            ).size(15.0));
+                            ui.add_space(12.0);
+
+                            if quest_tracker.completed_hatchery && quest_tracker.active_quest == quests::QuestId::None {
+                                if ui.button(egui::RichText::new("🗝️ Accept Quest 3: The Astral Compass").strong().size(16.0).color(egui::Color32::YELLOW)).clicked() {
+                                    quest_tracker.active_quest = quests::QuestId::AstralCompass;
+                                    inventory_log("📜 Accepted Quest: The Astral Compass!");
+                                    close_requested = true;
+                                }
+                            } else if quest_tracker.active_quest == quests::QuestId::AstralCompass {
+                                if inventory.alien_tech >= 3 {
+                                    if ui.button(egui::RichText::new("⚡ Turn In Relic (+50 Energy Shield, +5 Platinum, +1 Hyperdrive Core)").strong().size(16.0).color(egui::Color32::GREEN)).clicked() {
+                                        quest_tracker.completed_compass = true;
+                                        quest_tracker.has_energy_shield = true;
+                                        quest_tracker.active_quest = quests::QuestId::None;
+                                        inventory.platinum += 5;
+                                        inventory.ship_repair_alien_tech += 1;
+                                        player.max_health += 50.0;
+                                        player.health += 50.0;
+                                        inventory_log("⚡ Unlocked Zolyrian Energy Shielding (+50 Max Shield HP Buff) & Hyperdrive Core!");
+                                        close_requested = true;
+                                    }
+                                } else {
+                                    ui.label(egui::RichText::new(format!("Search subterranean vaults for Alien Relic Core (Alien Tech [{}/3])", inventory.alien_tech)).color(egui::Color32::LIGHT_GRAY));
+                                }
+                            } else if !quest_tracker.completed_hatchery {
+                                ui.label(egui::RichText::new("🔒 (Requires completing Quest 2 first)").color(egui::Color32::GRAY));
+                            }
+                        } else {
+                            ui.label(egui::RichText::new("The Astral Compass is restored to our altar! Your armor now hums with energy shielding.").size(15.0).color(egui::Color32::GREEN));
+                        }
+                    }
+                    _ => {}
+                }
+
+                ui.add_space(16.0);
+                ui.horizontal(|ui| {
+                    if ui.add(egui::Button::new(egui::RichText::new("✖ Close Dialogue").strong().size(15.0).color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(160, 40, 40))).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        close_requested = true;
+                    }
+                });
+            });
+        if close_requested || !is_open {
+            dialogue_state.is_open = false;
+        }
+    }
+
+    // --- 3. HYDRO-SHRINE RESTORATION INTERACTION ---
+    if let Some((shrine_ent, shrine_trans, shrine)) = shrine_query.iter().next()
+        && player.position.distance(shrine_trans.translation) < 4.0
+        && !shrine.is_rebuilt
+        && quest_tracker.active_quest == quests::QuestId::RebuildShrine
+    {
+        let has_mats =
+            inventory.wood >= 10 && inventory.granite >= 10 && inventory.crystal_shard >= 5;
+        if has_mats {
+            egui::Area::new(egui::Id::new("shrine_rebuild_prompt"))
+                        .anchor(egui::Align2::CENTER_BOTTOM, egui::Vec2::new(0.0, -145.0))
+                        .show(ctx, |ui| {
+                            ui.label(
+                                egui::RichText::new("⚡ Press [E] to Restore Zolyrian Hydro-Shrine! (-10 Wood, -10 Granite, -5 Crystals)")
+                                    .size(19.0)
+                                    .strong()
+                                    .color(egui::Color32::from_rgb(80, 255, 220)),
+                            );
+                        });
+
+            if keyboard.just_pressed(KeyCode::KeyE) {
+                inventory.wood -= 10;
+                inventory.granite -= 10;
+                inventory.crystal_shard -= 5;
+                quest_tracker.completed_shrine = true;
+                quest_tracker.active_quest = quests::QuestId::None;
+                player.max_health += 20.0;
+                player.health += 20.0;
+                inventory_log(
+                    "✨ Zolyrian Hydro-Shrine RESTORED! Granted +20 Max Health Blessing!",
+                );
+
+                // Re-spawn glowing restored shrine
+                commands.entity(shrine_ent).despawn();
+                quests::spawn_hydro_shrine(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    shrine_trans.translation,
+                    true,
+                );
+            }
+        }
+    }
+
+    // --- 4. HARMONY BEACON EMPOWERMENT INTERACTION ---
+    for (_beacon_ent, beacon_trans, mut beacon) in beacon_query.iter_mut() {
+        if player.position.distance(beacon_trans.translation) < 4.0
+            && !beacon.is_active
+            && quest_tracker.active_quest == quests::QuestId::HarmonyBeacons
+        {
+            egui::Area::new(egui::Id::new("beacon_prompt"))
+                .anchor(egui::Align2::CENTER_BOTTOM, egui::Vec2::new(0.0, -145.0))
+                .show(ctx, |ui| {
+                    ui.label(
+                        egui::RichText::new("📡 Press [E] to Empower Harmony Beacon Spire!")
+                            .size(19.0)
+                            .strong()
+                            .color(egui::Color32::from_rgb(100, 255, 120)),
+                    );
+                });
+
+            if keyboard.just_pressed(KeyCode::KeyE) {
+                beacon.is_active = true;
+                quest_tracker.beacons_activated += 1;
+                inventory_log(&format!(
+                    "📡 Empowered Harmony Beacon [{}/3]!",
+                    quest_tracker.beacons_activated
+                ));
+            }
+        }
+    }
+
+    // --- 5. ACTIVE QUEST JOURNAL HUD OVERLAY ---
+    if quest_tracker.active_quest != quests::QuestId::None {
+        egui::Window::new("📜 Active Quest Journal")
+            .default_width(260.0)
+            .anchor(egui::Align2::RIGHT_TOP, egui::Vec2::new(-10.0, 10.0))
+            .collapsible(true)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.heading(
+                    egui::RichText::new(quest_tracker.active_quest.title())
+                        .strong()
+                        .color(egui::Color32::YELLOW),
+                );
+                ui.separator();
+                ui.label(egui::RichText::new(quest_tracker.active_quest.description()).size(13.0));
+                ui.separator();
+                match quest_tracker.active_quest {
+                    quests::QuestId::RebuildShrine => {
+                        ui.label(format!("Wood: {}/10", inventory.wood));
+                        ui.label(format!("Granite: {}/10", inventory.granite));
+                        ui.label(format!("Crystal Shards: {}/5", inventory.crystal_shard));
+                    }
+                    quests::QuestId::ThreatAtHatchery => {
+                        ui.label(format!(
+                            "Beasts Defeated: {}/5",
+                            quest_tracker.quest_progress
+                        ));
+                    }
+                    quests::QuestId::AstralCompass => {
+                        ui.label(format!("Relic Alien Tech: {}/3", inventory.alien_tech));
+                    }
+                    quests::QuestId::HarmonyBeacons => {
+                        ui.label(format!(
+                            "Beacons Empowered: {}/3",
+                            quest_tracker.beacons_activated
+                        ));
+                    }
+                    _ => {}
+                }
+            });
+    }
 }
 
 fn poll_terrain_load_system(
@@ -2316,7 +2701,7 @@ fn poll_terrain_load_system(
     asset_server: Res<AssetServer>,
 ) {
     let Some(chan) = channel else { return };
-    if let Ok((terrain_mesh, grass_chunks)) = chan.rx.lock().unwrap().try_recv() {
+    if let Ok((terrain_mesh, grass_chunks)) = chan.rx.try_recv() {
         // Spawn terrain visual mesh
         commands.spawn((
             Mesh3d(meshes.add(terrain_mesh)),
@@ -2451,6 +2836,18 @@ static HOUSE_POS_X: AtomicU32 = AtomicU32::new(0);
 static HOUSE_POS_Z: AtomicU32 = AtomicU32::new(0);
 static HOUSE_PLACED: AtomicBool = AtomicBool::new(false);
 
+static OUTPOST_POS_X: AtomicU32 = AtomicU32::new(0);
+static OUTPOST_POS_Y: AtomicU32 = AtomicU32::new(0);
+static OUTPOST_POS_Z: AtomicU32 = AtomicU32::new(0);
+static OUTPOST_PLACED: AtomicBool = AtomicBool::new(false);
+
+pub fn set_outpost_global_bounds(outpost_pos: Vec3) {
+    OUTPOST_POS_X.store(outpost_pos.x.to_bits(), Ordering::Relaxed);
+    OUTPOST_POS_Y.store(outpost_pos.y.to_bits(), Ordering::Relaxed);
+    OUTPOST_POS_Z.store(outpost_pos.z.to_bits(), Ordering::Relaxed);
+    OUTPOST_PLACED.store(true, Ordering::Relaxed);
+}
+
 /// Returns (floor_y, ceiling_y) for the given position.
 /// Used for grounding the player/creatures AND preventing them from passing through ceilings.
 fn get_floor_and_ceiling(pos: Vec3, terrain_y: f32) -> (f32, f32) {
@@ -2463,6 +2860,43 @@ fn get_floor_and_ceiling(pos: Vec3, terrain_y: f32) -> (f32, f32) {
     if pos.y < -30.0 {
         return (-50.0, -46.0); // Basement
     }
+
+    let mut effective_terrain = terrain_y;
+
+    if OUTPOST_PLACED.load(Ordering::Relaxed) {
+        let op_x = f32::from_bits(OUTPOST_POS_X.load(Ordering::Relaxed));
+        let op_y = f32::from_bits(OUTPOST_POS_Y.load(Ordering::Relaxed));
+        let op_z = f32::from_bits(OUTPOST_POS_Z.load(Ordering::Relaxed));
+
+        let dx = pos.x - op_x;
+        let dz = pos.z - op_z;
+        let dist = (dx * dx + dz * dz).sqrt();
+
+        let platform_top = op_y + 2.0;
+        if dist < 12.2 {
+            if pos.y >= op_y - 3.0 {
+                effective_terrain = effective_terrain.max(platform_top);
+            }
+        } else if dist < 29.5 {
+            // Check angle window around the 4 ramp entrances (North, South, East, West)
+            let angle = dz.atan2(dx);
+            let is_on_ramp = (0..4).any(|i| {
+                let r_angle = (i as f32) * std::f32::consts::FRAC_PI_2;
+                let diff = (angle - r_angle).sin().abs();
+                diff < 0.28
+            });
+
+            if is_on_ramp {
+                // Exact top surface height matching physical 3D ramp slab (op_y - 2.62 at 29.5m up to op_y + 2.19 at 11.5m)
+                let ramp_t = ((29.5 - dist) / 18.0).clamp(0.0, 1.0);
+                let ramp_h = (op_y - 2.62) + (4.81 * ramp_t);
+                if pos.y >= op_y - 4.5 {
+                    effective_terrain = effective_terrain.max(ramp_h);
+                }
+            }
+        }
+    }
+
     if HOUSE_PLACED.load(Ordering::Relaxed) {
         let cols = MANSION_COLS.load(Ordering::Relaxed);
         let rows = MANSION_ROWS.load(Ordering::Relaxed);
@@ -2478,7 +2912,7 @@ fn get_floor_and_ceiling(pos: Vec3, terrain_y: f32) -> (f32, f32) {
             (pos.x - house_pos_x).abs() < apron_w && (pos.z - house_pos_z).abs() < apron_d;
         let inside_mansion =
             (pos.x - house_pos_x).abs() < half_w && (pos.z - house_pos_z).abs() < half_d;
-        let house_ground_y = terrain_y.clamp(1.5, 45.0);
+        let house_ground_y = effective_terrain.clamp(1.5, 45.0);
 
         if inside_mansion {
             let rel_x = pos.x - (house_pos_x - half_w);
@@ -2508,15 +2942,15 @@ fn get_floor_and_ceiling(pos: Vec3, terrain_y: f32) -> (f32, f32) {
             // Ensures smooth, continuous floor height when stepping on/off from any angle
             (house_ground_y + 0.07, f32::MAX)
         } else {
-            (terrain_y, f32::MAX) // Outdoors — no ceiling
+            (effective_terrain, f32::MAX) // Outdoors — no ceiling
         }
     } else {
-        (terrain_y, f32::MAX) // Outdoors — no ceiling
+        (effective_terrain, f32::MAX) // Outdoors — no ceiling
     }
 }
 
 /// Convenience wrapper that returns only the floor height (backwards-compatible).
-fn get_effective_floor_height(pos: Vec3, terrain_y: f32) -> f32 {
+pub fn get_effective_floor_height(pos: Vec3, terrain_y: f32) -> f32 {
     get_floor_and_ceiling(pos, terrain_y).0
 }
 
@@ -2529,6 +2963,7 @@ struct PlayerMovementParams<'w, 's> {
     player_config_query: Query<'w, 's, &'static bevy_tnua::prelude::TnuaConfig<ControlScheme>>,
     control_configs: ResMut<'w, Assets<ControlSchemeConfig>>,
     inventory: ResMut<'w, PlayerInventory>,
+    quest_tracker: ResMut<'w, quests::QuestTracker>,
     mouse_input: Res<'w, ButtonInput<MouseButton>>,
     puzzle_state: Res<'w, crate::play_mode::house::HousePuzzleState>,
     ladder_query: Query<'w, 's, &'static GlobalTransform, With<structures::WatchtowerLadder>>,
@@ -2582,10 +3017,15 @@ fn player_movement_and_ragdoll_system(
     };
 
     if keyboard_input.just_pressed(KeyCode::F5) {
-        let _ = save_progress(&params.inventory, &player, &settings);
+        let _ = save_progress(&params.inventory, &player, &settings, &params.quest_tracker);
     }
     if keyboard_input.just_pressed(KeyCode::F9) {
-        let _ = load_progress(&mut params.inventory, &mut player, &mut settings);
+        let _ = load_progress(
+            &mut params.inventory,
+            &mut player,
+            &mut settings,
+            &mut params.quest_tracker,
+        );
     }
     let ui_active = params.inventory.show_ship_repair_window
         || params.inventory.show_alien_store
@@ -3074,7 +3514,10 @@ fn player_movement_and_ragdoll_system(
 
             let updated_target_y = player_transform.translation.y - float_height;
             let target_visual_y = updated_target_y.max(current_ground_y);
-            if !player.is_walking && !is_airborne && (target_visual_y - current_ground_y).abs() < 0.04 {
+            if !player.is_walking
+                && !is_airborne
+                && (target_visual_y - current_ground_y).abs() < 0.04
+            {
                 player.position.y = current_ground_y;
             } else {
                 player.position.y = target_visual_y;
@@ -3464,7 +3907,9 @@ fn player_movement_and_ragdoll_system(
 
                     if water_depth > 0.8 && player.position.y <= water_settings.height - 0.40 {
                         player.state = PlayerState::Swimming;
-                        inventory_log("🏊 Touched water surface — flight suit disengaged, swimming mode active.");
+                        inventory_log(
+                            "🏊 Touched water surface — flight suit disengaged, swimming mode active.",
+                        );
                     } else if player.position.y <= ground_y + 0.05 {
                         player.state = PlayerState::Active;
                         inventory_log("🦅 Landed on ground. Flying mode deactivated.");
@@ -4911,18 +5356,28 @@ fn play_visual_sync_system(
 }
 
 // Egui HUD inventory panel overlay, crafting sidebar, and alert log rendering
+#[derive(bevy::ecs::system::SystemParam)]
+struct PlayHudParams<'w, 's> {
+    commands: Commands<'w, 's>,
+    next_state: ResMut<'w, NextState<AppState>>,
+    inventory: ResMut<'w, PlayerInventory>,
+    map: Res<'w, TempestMap>,
+    meshes: ResMut<'w, Assets<Mesh>>,
+    materials: ResMut<'w, Assets<StandardMaterial>>,
+    asset_server: Res<'w, AssetServer>,
+    keyboard: Res<'w, ButtonInput<KeyCode>>,
+    building_state: ResMut<'w, structures::BuildingPlacementState>,
+    char_settings: ResMut<'w, CharacterSettings>,
+    water_settings: Res<'w, WaterSettings>,
+    cave_data: Res<'w, cave::CaveSystemData>,
+    quest_tracker: ResMut<'w, quests::QuestTracker>,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn play_mode_hud_ui(
-    mut commands: Commands,
+    mut params: PlayHudParams,
     mut contexts: EguiContexts,
-    mut next_state: ResMut<NextState<AppState>>,
-    mut inventory: ResMut<PlayerInventory>,
     mut player_query: Query<&mut PlayModePlayer>,
-    map: Res<TempestMap>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
-    keyboard: Res<ButtonInput<KeyCode>>,
     creature_query: Query<(
         Entity,
         &Transform,
@@ -4930,10 +5385,6 @@ fn play_mode_hud_ui(
         Option<&creatures::AggroState>,
     )>,
     starship_query: Query<(&Transform, &CrashedStarship)>,
-    mut building_state: ResMut<structures::BuildingPlacementState>,
-    mut char_settings: ResMut<CharacterSettings>,
-    water_settings: Res<WaterSettings>,
-    cave_data: Res<cave::CaveSystemData>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
@@ -4942,11 +5393,25 @@ fn play_mode_hud_ui(
         return;
     };
 
+    let commands = &mut params.commands;
+    let inventory = &mut params.inventory;
+    let next_state = &mut params.next_state;
+    let char_settings = &mut params.char_settings;
+    let quest_tracker = &mut params.quest_tracker;
+    let keyboard = &params.keyboard;
+    let map = &params.map;
+    let meshes = &mut params.meshes;
+    let materials = &mut params.materials;
+    let asset_server = &params.asset_server;
+    let building_state = &mut params.building_state;
+    let water_settings = &params.water_settings;
+    let cave_data = &params.cave_data;
+
     if keyboard.just_pressed(KeyCode::F5) {
-        let _ = save_progress(&inventory, &player, &char_settings);
+        let _ = save_progress(inventory, &player, char_settings, quest_tracker);
     }
     if keyboard.just_pressed(KeyCode::F9) {
-        let _ = load_progress(&mut inventory, &mut player, &mut char_settings);
+        let _ = load_progress(inventory, &mut player, char_settings, quest_tracker);
     }
 
     egui::Window::new("🎮 Play Mode HUD & Inventory")
@@ -5041,7 +5506,7 @@ fn play_mode_hud_ui(
                     )
                     .clicked()
                 {
-                    let _ = save_progress(&inventory, &player, &char_settings);
+                    let _ = save_progress(inventory, &player, char_settings, quest_tracker);
                 }
                 if ui
                     .add(
@@ -5054,7 +5519,7 @@ fn play_mode_hud_ui(
                     )
                     .clicked()
                 {
-                    let _ = load_progress(&mut inventory, &mut player, &mut char_settings);
+                    let _ = load_progress(inventory, &mut player, char_settings, quest_tracker);
                 }
             });
             ui.add_space(10.0);
@@ -5143,7 +5608,7 @@ fn play_mode_hud_ui(
                     let yaw = player.rotation_yaw;
                     let forward = Vec3::new(yaw.cos(), 0.0, yaw.sin());
                     let spawn_pos = player.position + forward * 2.5;
-                    let terrain_y = get_bilinear_height(spawn_pos.x, spawn_pos.z, &map);
+                    let terrain_y = get_bilinear_height(spawn_pos.x, spawn_pos.z, map);
                     let shelter_pos = Vec3::new(spawn_pos.x, terrain_y, spawn_pos.z);
 
                     let rotation = Quat::from_rotation_y(-yaw);
@@ -5444,7 +5909,7 @@ fn play_mode_hud_ui(
                     let yaw = player.rotation_yaw;
                     let forward = Vec3::new(yaw.cos(), 0.0, yaw.sin());
                     let spawn_pos = player.position + forward * 3.0;
-                    let terrain_y = get_bilinear_height(spawn_pos.x, spawn_pos.z, &map);
+                    let terrain_y = get_bilinear_height(spawn_pos.x, spawn_pos.z, map);
                     let shelter_pos = Vec3::new(spawn_pos.x, terrain_y, spawn_pos.z);
 
                     let rotation = Quat::from_rotation_y(-yaw);
@@ -6158,7 +6623,7 @@ fn play_mode_hud_ui(
     let crash_site_pos = if let Ok((ship_trans, _)) = starship_query.single() {
         ship_trans.translation
     } else {
-        Vec3::new(8.0, get_bilinear_height(8.0, 10.0, &map), 10.0)
+        Vec3::new(8.0, get_bilinear_height(8.0, 10.0, map), 10.0)
     };
     let near_starship = player.position.distance(crash_site_pos) < 7.0;
 
@@ -6574,7 +7039,9 @@ fn play_mode_hud_ui(
             let map_h = map.height as f32;
             let water_y = water_settings.height;
 
-            let world_to_minimap: Box<dyn Fn(f32, f32) -> egui::Pos2> = if is_underground && !cave_data.grid.is_empty() {
+            let world_to_minimap: Box<dyn Fn(f32, f32) -> egui::Pos2> = if is_underground
+                && !cave_data.grid.is_empty()
+            {
                 let cols = cave_data.grid_cols;
                 let rows = cave_data.grid_rows;
                 let cave_w = cols as f32 * crate::play_mode::cave::CAVE_CELL_SIZE;
@@ -6592,9 +7059,9 @@ fn play_mode_hud_ui(
                         let cell = cave_data.grid[c][r];
 
                         let color = match cell {
-                            0 => egui::Color32::from_rgb(28, 32, 42),  // Solid Rock Wall
-                            1 => egui::Color32::from_rgb(15, 24, 38),  // Open Tunnel Passage
-                            2 => egui::Color32::from_rgb(22, 58, 78),  // Cavern Hub / Chamber
+                            0 => egui::Color32::from_rgb(28, 32, 42), // Solid Rock Wall
+                            1 => egui::Color32::from_rgb(15, 24, 38), // Open Tunnel Passage
+                            2 => egui::Color32::from_rgb(22, 58, 78), // Cavern Hub / Chamber
                             _ => egui::Color32::from_rgb(10, 12, 18),
                         };
 
@@ -6631,7 +7098,8 @@ fn play_mode_hud_ui(
                         let map_x = (px as f32 * step_x) as u32;
                         let map_z = (pz as f32 * step_z) as u32;
                         let h = map.get_height(map_x.min(map.width - 1), map_z.min(map.height - 1));
-                        let biome = map.get_biome(map_x.min(map.width - 1), map_z.min(map.height - 1));
+                        let biome =
+                            map.get_biome(map_x.min(map.width - 1), map_z.min(map.height - 1));
 
                         let color = if h < water_y {
                             let depth = ((water_y - h) * 8.0).clamp(0.0, 1.0);
@@ -6643,11 +7111,13 @@ fn play_mode_hud_ui(
                         } else {
                             let elev = (h * 3.0).clamp(0.0, 1.0);
                             match biome {
-                                crate::map_editor::data::Biome::Temperate => egui::Color32::from_rgb(
-                                    (30.0 + elev * 40.0) as u8,
-                                    (70.0 + elev * 90.0) as u8,
-                                    (25.0 + elev * 30.0) as u8,
-                                ),
+                                crate::map_editor::data::Biome::Temperate => {
+                                    egui::Color32::from_rgb(
+                                        (30.0 + elev * 40.0) as u8,
+                                        (70.0 + elev * 90.0) as u8,
+                                        (25.0 + elev * 30.0) as u8,
+                                    )
+                                }
                                 crate::map_editor::data::Biome::Arid => egui::Color32::from_rgb(
                                     (140.0 + elev * 60.0) as u8,
                                     (110.0 + elev * 50.0) as u8,
@@ -7089,6 +7559,7 @@ fn player_armor_sync_system(
     armor_query: Query<(Entity, &PlayArmorVisual)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
 ) {
     let current_equipped = inventory.equipped_armor;
 
@@ -7262,24 +7733,69 @@ fn player_armor_sync_system(
             chestplate
         }
         ArmorTier::FlightSuit => {
-            // Sleek High-Tech Cyber Suit body
+            // Dedicated 4K High-Tech Metallic Cyber Armor Texture (Custom Generated & Upscayled)
+            let repeat_tex = asset_server
+                .load_builder()
+                .with_settings(|settings: &mut bevy::image::ImageLoaderSettings| {
+                    settings.sampler = bevy::image::ImageSampler::Descriptor(
+                        bevy::image::ImageSamplerDescriptor {
+                            address_mode_u: bevy::image::ImageAddressMode::Repeat,
+                            address_mode_v: bevy::image::ImageAddressMode::Repeat,
+                            ..default()
+                        },
+                    );
+                })
+                .load("textures/cyber_suit.png");
+
+            // Main chassis material: Dark titanium alloy with battle scratches and metallic specular depth
             let cyber_mat = materials.add(StandardMaterial {
-                base_color: Color::srgb(0.08, 0.16, 0.24),
-                metallic: 0.9,
-                perceptual_roughness: 0.15,
-                emissive: LinearRgba::new(0.1, 0.8, 1.5, 1.0),
+                base_color: Color::srgb(0.15, 0.22, 0.30),
+                base_color_texture: Some(repeat_tex.clone()),
+                metallic: 0.88,
+                perceptual_roughness: 0.35,
+                emissive: LinearRgba::new(0.1, 0.4, 0.6, 1.0),
                 ..default()
             });
+
+            // Weathered dark carbon composite harness & blast plates
+            let carbon_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.08, 0.10, 0.14),
+                base_color_texture: Some(repeat_tex.clone()),
+                metallic: 0.6,
+                perceptual_roughness: 0.60,
+                ..default()
+            });
+
+            // Burnished copper/gold heat shield trim for thruster housings & joint rings
+            let heat_shield_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.88, 0.56, 0.22),
+                metallic: 0.95,
+                perceptual_roughness: 0.26,
+                emissive: LinearRgba::new(0.4, 0.2, 0.05, 1.0),
+                ..default()
+            });
+
+            // High-energy Plasma Arc Core reactor material
             let glow_core_mat = materials.add(StandardMaterial {
-                base_color: Color::srgb(0.2, 1.0, 0.8),
-                emissive: LinearRgba::new(2.0, 12.0, 15.0, 1.0),
+                base_color: Color::srgb(0.1, 1.0, 0.85),
+                emissive: LinearRgba::new(3.0, 16.0, 20.0, 1.0),
                 unlit: true,
                 ..default()
             });
 
+            // Thruster Exhaust Flame Cone material
+            let thruster_flame_mat = materials.add(StandardMaterial {
+                base_color: Color::srgba(0.2, 0.9, 1.0, 0.85),
+                emissive: LinearRgba::new(5.0, 22.0, 28.0, 1.0),
+                alpha_mode: AlphaMode::Blend,
+                unlit: true,
+                ..default()
+            });
+
+            // --- 1. MAIN CHESTPACK RIG ---
             let suit_root = commands
                 .spawn((
-                    Mesh3d(meshes.add(Cuboid::new(0.44, 0.5, 0.34))),
+                    Mesh3d(meshes.add(create_world_uv_cuboid(Vec3::new(0.46, 0.52, 0.36), 0.8))),
                     MeshMaterial3d(cyber_mat.clone()),
                     Transform::from_xyz(0.0, -0.12, 0.0),
                     PlayArmorVisual {
@@ -7289,57 +7805,176 @@ fn player_armor_sync_system(
                 ))
                 .id();
 
-            // Glowing Arc Core Reactor on Chest
-            let core = commands
+            // Tactical Front Armor Plate (Beveled Overlay with custom cyber texture)
+            let chest_plate = commands
                 .spawn((
-                    Mesh3d(meshes.add(Sphere::new(0.09).mesh().ico(4).unwrap())),
-                    MeshMaterial3d(glow_core_mat.clone()),
-                    Transform::from_xyz(0.0, 0.05, 0.18),
+                    Mesh3d(meshes.add(create_world_uv_cuboid(Vec3::new(0.38, 0.40, 0.06), 0.5))),
+                    MeshMaterial3d(carbon_mat.clone()),
+                    Transform::from_xyz(0.0, 0.0, 0.16),
                     PlayModeEntity,
                 ))
                 .id();
-            commands.entity(suit_root).add_child(core);
+            commands.entity(suit_root).add_child(chest_plate);
 
-            // Cyber Shoulder Pauldrons
-            for side in [-0.26f32, 0.26f32] {
+            // Weathered Side Structural Straps (Harness Ribs)
+            for side in [-0.22f32, 0.22f32] {
+                let strap = commands
+                    .spawn((
+                        Mesh3d(
+                            meshes.add(create_world_uv_cuboid(Vec3::new(0.05, 0.48, 0.34), 0.5)),
+                        ),
+                        MeshMaterial3d(carbon_mat.clone()),
+                        Transform::from_xyz(side, 0.0, 0.0),
+                        PlayModeEntity,
+                    ))
+                    .id();
+                commands.entity(suit_root).add_child(strap);
+            }
+
+            // Glowing Arc Core Reactor Housing & Crystal Lens
+            let core_ring = commands
+                .spawn((
+                    Mesh3d(meshes.add(Cylinder::new(0.12, 0.05))),
+                    MeshMaterial3d(heat_shield_mat.clone()),
+                    Transform::from_xyz(0.0, 0.05, 0.185)
+                        .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                    PlayModeEntity,
+                ))
+                .id();
+            commands.entity(suit_root).add_child(core_ring);
+
+            let core_lens = commands
+                .spawn((
+                    Mesh3d(meshes.add(Sphere::new(0.09).mesh().ico(4).unwrap())),
+                    MeshMaterial3d(glow_core_mat.clone()),
+                    Transform::from_xyz(0.0, 0.05, 0.19),
+                    PlayModeEntity,
+                ))
+                .id();
+            commands.entity(suit_root).add_child(core_lens);
+
+            // Core Light Glow Emission
+            let core_light = commands
+                .spawn((
+                    PointLight {
+                        color: Color::srgb(0.2, 0.95, 1.0),
+                        intensity: 120.0,
+                        range: 4.0,
+                        ..default()
+                    },
+                    Transform::from_xyz(0.0, 0.05, 0.25),
+                    PlayModeEntity,
+                ))
+                .id();
+            commands.entity(suit_root).add_child(core_light);
+
+            // --- 2. HEAVY TACTICAL PAULDRONS ---
+            for side in [-0.27f32, 0.27f32] {
                 let pauldron = commands
                     .spawn((
-                        Mesh3d(meshes.add(Cuboid::new(0.16, 0.15, 0.22))),
+                        Mesh3d(
+                            meshes.add(create_world_uv_cuboid(Vec3::new(0.18, 0.16, 0.24), 0.5)),
+                        ),
                         MeshMaterial3d(cyber_mat.clone()),
                         Transform::from_xyz(side, 0.06, 0.0),
                         PlayModeEntity,
                     ))
                     .id();
-                commands.entity(suit_root).add_child(pauldron);
-            }
 
-            // Twin Jetpack Thrusters on Back
-            for side in [-0.14f32, 0.14f32] {
-                let thruster = commands
+                // Pauldron Carbon Edge Guard
+                let edge_guard = commands
                     .spawn((
-                        Mesh3d(meshes.add(Cylinder::new(0.07, 0.45))),
-                        MeshMaterial3d(cyber_mat.clone()),
-                        Transform::from_xyz(side, 0.0, -0.22),
+                        Mesh3d(
+                            meshes.add(create_world_uv_cuboid(Vec3::new(0.19, 0.04, 0.25), 0.5)),
+                        ),
+                        MeshMaterial3d(carbon_mat.clone()),
+                        Transform::from_xyz(0.0, 0.07, 0.0),
                         PlayModeEntity,
                     ))
                     .id();
+                commands.entity(pauldron).add_child(edge_guard);
+                commands.entity(suit_root).add_child(pauldron);
+            }
+
+            // --- 3. TWIN DUAL-VECTOR JETPACK THRUSTERS (Angled Backward & Outward to Clear Legs) ---
+            for side in [-0.24f32, 0.24f32] {
+                let side_angle = if side < 0.0 { -0.14 } else { 0.14 };
+                let thruster = commands
+                    .spawn((
+                        Mesh3d(meshes.add(Cylinder::new(0.08, 0.48))),
+                        MeshMaterial3d(cyber_mat.clone()),
+                        Transform::from_xyz(side, 0.08, -0.32).with_rotation(Quat::from_euler(
+                            EulerRot::YXZ,
+                            side_angle,
+                            0.55,
+                            0.0,
+                        )),
+                        PlayModeEntity,
+                    ))
+                    .id();
+
+                // Heat-Shielded Copper Exhaust Ring
+                let exhaust_ring = commands
+                    .spawn((
+                        Mesh3d(meshes.add(Cylinder::new(0.092, 0.08))),
+                        MeshMaterial3d(heat_shield_mat.clone()),
+                        Transform::from_xyz(0.0, -0.22, 0.0),
+                        PlayModeEntity,
+                    ))
+                    .id();
+                commands.entity(thruster).add_child(exhaust_ring);
+
+                // Internal Glowing Plasma Nozzle
                 let nozzle = commands
                     .spawn((
-                        Mesh3d(meshes.add(Sphere::new(0.05))),
+                        Mesh3d(meshes.add(Sphere::new(0.065))),
                         MeshMaterial3d(glow_core_mat.clone()),
-                        Transform::from_xyz(0.0, -0.24, 0.0),
+                        Transform::from_xyz(0.0, -0.25, 0.0),
                         PlayModeEntity,
                     ))
                     .id();
                 commands.entity(thruster).add_child(nozzle);
+
+                // Plasma Exhaust Fire Plume (Angled Backward with Zero Leg Clipping)
+                let flame_plume = commands
+                    .spawn((
+                        Mesh3d(meshes.add(Cone {
+                            radius: 0.07,
+                            height: 0.38,
+                        })),
+                        MeshMaterial3d(thruster_flame_mat.clone()),
+                        Transform::from_xyz(0.0, -0.42, 0.0)
+                            .with_rotation(Quat::from_rotation_x(std::f32::consts::PI)),
+                        ThrusterFlame,
+                        PlayModeEntity,
+                    ))
+                    .id();
+                commands.entity(thruster).add_child(flame_plume);
+
+                // Dynamic Thruster Point Light
+                let thruster_light = commands
+                    .spawn((
+                        PointLight {
+                            color: Color::srgb(0.1, 0.9, 1.0),
+                            intensity: 220.0,
+                            range: 5.0,
+                            ..default()
+                        },
+                        Transform::from_xyz(0.0, -0.35, 0.0),
+                        ThrusterFlame,
+                        PlayModeEntity,
+                    ))
+                    .id();
+                commands.entity(thruster).add_child(thruster_light);
+
                 commands.entity(suit_root).add_child(thruster);
             }
 
-            // High-Tech Cyber Flight Helmet attached to Head joint!
+            // --- 4. HIGH-TECH BATTLE-WORN HELMET ---
             if let Some(head_ent) = head_entity {
                 let visor_glow_mat = materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.2, 1.0, 0.85),
-                    emissive: LinearRgba::new(3.0, 15.0, 18.0, 1.0),
+                    base_color: Color::srgb(0.15, 1.0, 0.88),
+                    emissive: LinearRgba::new(4.0, 18.0, 22.0, 1.0),
                     unlit: true,
                     ..default()
                 });
@@ -7347,7 +7982,7 @@ fn player_armor_sync_system(
                 // Cyber Helmet Dome Shell
                 let helmet = commands
                     .spawn((
-                        Mesh3d(meshes.add(Sphere::new(0.22).mesh().ico(4).unwrap())),
+                        Mesh3d(meshes.add(Sphere::new(0.23).mesh().ico(4).unwrap())),
                         MeshMaterial3d(cyber_mat.clone()),
                         Transform::from_xyz(0.0, 0.04, 0.02),
                         PlayArmorVisual {
@@ -7357,10 +7992,25 @@ fn player_armor_sync_system(
                     ))
                     .id();
 
-                // Glowing Cyber Visor
+                // Reinforced Carbon Brow Guard
+                let brow = commands
+                    .spawn((
+                        Mesh3d(
+                            meshes.add(create_world_uv_cuboid(Vec3::new(0.24, 0.05, 0.16), 0.4)),
+                        ),
+                        MeshMaterial3d(carbon_mat.clone()),
+                        Transform::from_xyz(0.0, 0.11, 0.08),
+                        PlayModeEntity,
+                    ))
+                    .id();
+                commands.entity(helmet).add_child(brow);
+
+                // Angular Glowing Cyber Visor
                 let visor = commands
                     .spawn((
-                        Mesh3d(meshes.add(Cuboid::new(0.22, 0.08, 0.12))),
+                        Mesh3d(
+                            meshes.add(create_world_uv_cuboid(Vec3::new(0.23, 0.09, 0.13), 0.3)),
+                        ),
                         MeshMaterial3d(visor_glow_mat),
                         Transform::from_xyz(0.0, 0.02, 0.14),
                         PlayModeEntity,
@@ -7368,12 +8018,15 @@ fn player_armor_sync_system(
                     .id();
                 commands.entity(helmet).add_child(visor);
 
-                // Side Communication Fins
-                for side in [-0.21f32, 0.21f32] {
+                // Tactical Comm Earpieces / Side Fins
+                for side in [-0.22f32, 0.22f32] {
                     let fin = commands
                         .spawn((
-                            Mesh3d(meshes.add(Cuboid::new(0.04, 0.14, 0.06))),
-                            MeshMaterial3d(cyber_mat.clone()),
+                            Mesh3d(
+                                meshes
+                                    .add(create_world_uv_cuboid(Vec3::new(0.05, 0.15, 0.08), 0.3)),
+                            ),
+                            MeshMaterial3d(heat_shield_mat.clone()),
                             Transform::from_xyz(side, 0.02, -0.02),
                             PlayModeEntity,
                         ))
@@ -7389,6 +8042,28 @@ fn player_armor_sync_system(
     };
 
     commands.entity(chest_ent).add_child(armor_entity);
+}
+
+// System to toggle jetpack thruster flame plume & point light visibility based on active flight state
+fn thruster_flame_visibility_system(
+    player_query: Query<&PlayModePlayer>,
+    mut flame_query: Query<&mut Visibility, With<ThrusterFlame>>,
+) {
+    let Ok(player) = player_query.single() else {
+        return;
+    };
+
+    let should_show = player.state == PlayerState::Flying;
+    for mut vis in flame_query.iter_mut() {
+        let new_vis = if should_show {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if *vis != new_vis {
+            *vis = new_vis;
+        }
+    }
 }
 
 // System to dynamically detach the weapon and attach it to the camera in first person mode
@@ -8261,9 +8936,22 @@ fn play_sky_cycle_system(
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct GunFireParams<'w, 's> {
+    commands: Commands<'w, 's>,
+    asset_server: Res<'w, AssetServer>,
+    map: Res<'w, TempestMap>,
+    water_settings: Res<'w, WaterSettings>,
+    meshes: ResMut<'w, Assets<Mesh>>,
+    materials: ResMut<'w, Assets<StandardMaterial>>,
+    impulse_writer: MessageWriter<'w, WaterImpulseEvent>,
+    builder: Res<'w, crate::procedural_walls::ProceduralWallBuilder>,
+    quest_tracker: ResMut<'w, quests::QuestTracker>,
+}
+
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn gun_fire_and_bullet_system(
-    mut commands: Commands,
+    mut params: GunFireParams,
     mut player_query: Query<&mut PlayModePlayer>,
     camera_query: Query<
         (&Transform, &PlayModeCamera),
@@ -8289,13 +8977,6 @@ fn gun_fire_and_bullet_system(
     mouse_button: Res<ButtonInput<MouseButton>>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
-    asset_server: Res<AssetServer>,
-    map: Res<TempestMap>,
-    water_settings: Res<WaterSettings>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut impulse_writer: MessageWriter<WaterImpulseEvent>,
-    builder: Res<crate::procedural_walls::ProceduralWallBuilder>,
     window_query: Query<&CursorOptions, With<Window>>,
 ) {
     let dt = time.delta_secs();
@@ -8351,7 +9032,7 @@ fn gun_fire_and_bullet_system(
     // Keyboard trigger for manual reloading
     if keyboard_input.just_pressed(KeyCode::KeyR)
         && player.reload_timer.is_none()
-        && !builder.active
+        && !params.builder.active
     {
         let mut reload_time = 0.0;
         let mut should_reload = false;
@@ -8386,8 +9067,8 @@ fn gun_fire_and_bullet_system(
 
         if should_reload {
             player.reload_timer = Some(reload_time);
-            commands.spawn((
-                AudioPlayer::new(asset_server.load(reload_sound)),
+            params.commands.spawn((
+                AudioPlayer::new(params.asset_server.load(reload_sound)),
                 PlaybackSettings::DESPAWN,
             ));
             inventory_log("⏳ Reloading weapon...");
@@ -8400,7 +9081,7 @@ fn gun_fire_and_bullet_system(
         .single()
         .is_ok_and(|c| c.grab_mode == CursorGrabMode::Locked);
 
-    if is_gun && is_cursor_locked && player.reload_timer.is_none() && !builder.active {
+    if is_gun && is_cursor_locked && player.reload_timer.is_none() && !params.builder.active {
         let mut try_shoot = false;
 
         if player.active_weapon == ActiveWeapon::Rifle {
@@ -8470,14 +9151,14 @@ fn gun_fire_and_bullet_system(
 
                 let bullet_vel = forward * bullet_speed;
 
-                let tracer_mesh = meshes.add(Sphere::new(0.06));
-                let tracer_mat = materials.add(StandardMaterial {
+                let tracer_mesh = params.meshes.add(Sphere::new(0.06));
+                let tracer_mat = params.materials.add(StandardMaterial {
                     base_color: Color::srgb(1.0, 0.9, 0.2),
                     emissive: LinearRgba::from(Color::srgb(1.0, 0.9, 0.2)) * 6.0,
                     ..default()
                 });
 
-                commands.spawn((
+                params.commands.spawn((
                     Mesh3d(tracer_mesh),
                     MeshMaterial3d(tracer_mat),
                     Transform::from_translation(start_pos),
@@ -8490,8 +9171,8 @@ fn gun_fire_and_bullet_system(
                     PlayModeEntity,
                 ));
 
-                commands.spawn((
-                    AudioPlayer::new(asset_server.load(sound_file)),
+                params.commands.spawn((
+                    AudioPlayer::new(params.asset_server.load(sound_file)),
                     PlaybackSettings::DESPAWN,
                 ));
 
@@ -8527,15 +9208,15 @@ fn gun_fire_and_bullet_system(
                     }
                     if do_auto {
                         player.reload_timer = Some(reload_time);
-                        commands.spawn((
-                            AudioPlayer::new(asset_server.load(reload_sound)),
+                        params.commands.spawn((
+                            AudioPlayer::new(params.asset_server.load(reload_sound)),
                             PlaybackSettings::DESPAWN,
                         ));
                     }
                 }
             } else {
-                commands.spawn((
-                    AudioPlayer::new(asset_server.load("gun_reload.wav")),
+                params.commands.spawn((
+                    AudioPlayer::new(params.asset_server.load("gun_reload.wav")),
                     PlaybackSettings {
                         speed: 2.2,
                         ..PlaybackSettings::DESPAWN
@@ -8549,7 +9230,7 @@ fn gun_fire_and_bullet_system(
     for (bullet_entity, mut bullet, mut transform) in bullet_query.iter_mut() {
         bullet.lifetime -= dt;
         if bullet.lifetime <= 0.0 {
-            commands.entity(bullet_entity).despawn();
+            params.commands.entity(bullet_entity).despawn();
             continue;
         }
 
@@ -8558,35 +9239,35 @@ fn gun_fire_and_bullet_system(
         let new_pos = old_pos + bullet.velocity * dt;
         transform.translation = new_pos;
 
-        let terrain_y = get_bilinear_height(new_pos.x, new_pos.z, &map);
+        let terrain_y = get_bilinear_height(new_pos.x, new_pos.z, &params.map);
 
         if new_pos.y <= terrain_y {
             spawn_bullet_impact_particles(
-                &mut commands,
-                &mut meshes,
-                &mut materials,
+                &mut params.commands,
+                &mut params.meshes,
+                &mut params.materials,
                 new_pos,
                 Color::srgb(0.5, 0.45, 0.4),
             );
-            commands.entity(bullet_entity).despawn();
+            params.commands.entity(bullet_entity).despawn();
             continue;
         }
 
-        let water_level = water_settings.height;
+        let water_level = params.water_settings.height;
         if old_pos.y > water_level && new_pos.y <= water_level {
-            impulse_writer.write(WaterImpulseEvent {
+            params.impulse_writer.write(WaterImpulseEvent {
                 position: Vec3::new(new_pos.x, water_level, new_pos.z),
                 force: -0.22,
                 radius: 1.5,
             });
             spawn_bullet_impact_particles(
-                &mut commands,
-                &mut meshes,
-                &mut materials,
+                &mut params.commands,
+                &mut params.meshes,
+                &mut params.materials,
                 Vec3::new(new_pos.x, water_level, new_pos.z),
                 Color::srgb(0.4, 0.6, 0.95),
             );
-            commands.entity(bullet_entity).despawn();
+            params.commands.entity(bullet_entity).despawn();
             continue;
         }
 
@@ -8647,9 +9328,9 @@ fn gun_fire_and_bullet_system(
             }
 
             spawn_bullet_impact_particles(
-                &mut commands,
-                &mut meshes,
-                &mut materials,
+                &mut params.commands,
+                &mut params.meshes,
+                &mut params.materials,
                 new_pos,
                 Color::srgb(1.0, 0.15, 0.15),
             );
@@ -8657,7 +9338,12 @@ fn gun_fire_and_bullet_system(
             if creature.health <= 0.0 {
                 creature.state = creatures::CreatureState::Dead;
                 creature.death_timer = 0.0;
-                spawn_player_kill_random_drop(&mut commands, &asset_server, c_pos + Vec3::Y * 0.3);
+                quests::check_and_increment_kill_counter(&mut params.quest_tracker);
+                spawn_player_kill_random_drop(
+                    &mut params.commands,
+                    &params.asset_server,
+                    c_pos + Vec3::Y * 0.3,
+                );
             } else {
                 inventory_log(&format!(
                     "💥 Hit creature! HP remaining: {}/{}",
@@ -8665,7 +9351,7 @@ fn gun_fire_and_bullet_system(
                 ));
             }
 
-            commands.entity(bullet_entity).despawn();
+            params.commands.entity(bullet_entity).despawn();
         }
     }
 }

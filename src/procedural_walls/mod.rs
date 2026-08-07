@@ -17,7 +17,7 @@ use crate::map_editor::data::TempestMap;
 use crate::play_mode::get_bilinear_height;
 use bevy::prelude::*;
 use rand::RngExt;
-use std::collections::HashMap;
+pub type FxHashMap<K, V> = rustc_hash::FxHashMap<K, V>;
 
 /// Plugin for procedural brick wall construction and destruction.
 pub struct ProceduralWallsPlugin;
@@ -227,10 +227,10 @@ struct BrickAdjacency {
 }
 
 fn compute_brick_adjacency(bricks: &[Brick]) -> Vec<BrickAdjacency> {
-    let mut left_edges: HashMap<(i32, i32), Vec<usize>> = HashMap::with_capacity(bricks.len());
-    let mut right_edges: HashMap<(i32, i32), Vec<usize>> = HashMap::with_capacity(bricks.len());
-    let mut top_edges: HashMap<i32, Vec<usize>> = HashMap::new();
-    let mut bottom_edges: HashMap<i32, Vec<usize>> = HashMap::new();
+    let mut left_edges: FxHashMap<(i32, i32), Vec<usize>> = FxHashMap::default();
+    let mut right_edges: FxHashMap<(i32, i32), Vec<usize>> = FxHashMap::default();
+    let mut top_edges: FxHashMap<i32, Vec<usize>> = FxHashMap::default();
+    let mut bottom_edges: FxHashMap<i32, Vec<usize>> = FxHashMap::default();
 
     for (idx, brick) in bricks.iter().enumerate() {
         let half_bounds = brick.bounds_uv * 0.5;
@@ -255,8 +255,10 @@ fn compute_brick_adjacency(bricks: &[Brick]) -> Vec<BrickAdjacency> {
         top_edges.entry(adjacency_key(top)).or_default().push(idx);
     }
 
+    use rayon::prelude::*;
+
     bricks
-        .iter()
+        .par_iter()
         .enumerate()
         .map(|(idx, brick)| {
             let half_bounds = brick.bounds_uv * 0.5;
@@ -299,7 +301,7 @@ fn compute_brick_adjacency(bricks: &[Brick]) -> Vec<BrickAdjacency> {
 }
 
 fn has_side_neighbor(
-    edge_map: &HashMap<(i32, i32), Vec<usize>>,
+    edge_map: &FxHashMap<(i32, i32), Vec<usize>>,
     edge: f32,
     row: f32,
     current_idx: usize,
@@ -322,7 +324,7 @@ fn has_side_neighbor(
 }
 
 fn has_vertical_neighbor(
-    edge_map: &HashMap<i32, Vec<usize>>,
+    edge_map: &FxHashMap<i32, Vec<usize>>,
     edge: f32,
     mut predicate: impl FnMut(usize) -> bool,
 ) -> bool {

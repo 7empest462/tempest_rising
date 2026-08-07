@@ -45,6 +45,8 @@ impl Plugin for GrassPlugin {
         app.add_plugins(MaterialPlugin::<GrassMaterial>::default());
         app.add_message::<GenerateGrassEvent>();
         app.add_systems(Update, spawn_grass_system);
+        app.add_systems(OnExit(crate::AppState::MapEditor), cleanup_grass);
+        app.add_systems(OnExit(crate::AppState::PlayMode), cleanup_grass);
     }
 }
 
@@ -359,7 +361,7 @@ pub fn generate_grass_chunks(
 fn spawn_grass_system(
     mut commands: Commands,
     mut ev_generate: MessageReader<GenerateGrassEvent>,
-    grass_query: Query<Entity, (With<ProceduralGrass>, Without<ChildOf>)>,
+    grass_query: Query<Entity, With<ProceduralGrass>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<GrassMaterial>>,
     asset_server: Res<AssetServer>,
@@ -410,6 +412,7 @@ fn spawn_grass_system(
                 MeshMaterial3d(grass_material.clone()),
                 Transform::default(),
                 ProceduralGrass,
+                crate::map_editor::MapEditorEntity,
             ));
         }
         if let Some(mesh) = chunk.single_mesh {
@@ -418,7 +421,14 @@ fn spawn_grass_system(
                 MeshMaterial3d(grass_single_material.clone()),
                 Transform::default(),
                 ProceduralGrass,
+                crate::map_editor::MapEditorEntity,
             ));
         }
+    }
+}
+
+fn cleanup_grass(mut commands: Commands, query: Query<Entity, With<ProceduralGrass>>) {
+    for entity in query.iter() {
+        commands.entity(entity).despawn();
     }
 }
